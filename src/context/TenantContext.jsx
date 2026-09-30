@@ -1,641 +1,334 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react'
-import {
-  collection, doc, onSnapshot, addDoc, updateDoc, deleteDoc,
-  writeBatch, increment, query, orderBy, limit, getDocs, getDoc, setDoc, where, arrayUnion
-} from 'firebase/firestore'
-import { db, isFirebaseConfigured } from '../lib/firebase'
-import { getTenantCollections } from '../lib/firestore-collections'
-import { generateCompanyCode } from '../lib/utils'
+import React, { createContext, useContext, useState, useMemo } from 'react'
+import { useQuery, useMutation } from 'convex/react'
+import { api } from '../../convex/_generated/api'
 import { useAuth } from './AuthContext'
 
 export const TenantContext = createContext(null)
 
-const getAvatar = (name = '', email = '') => {
-  if (name && name.trim()) {
-    return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
-  }
-  if (email && email.trim()) {
-    return email.slice(0, 2).toUpperCase()
-  }
-  return 'LG'
-}
-
-const toIso = (ts) => {
-  if (!ts) return new Date().toISOString()
-  if (typeof ts === 'string') return ts
-  if (ts?.toDate) return ts.toDate().toISOString()
-  return new Date().toISOString()
-}
-
 export function TenantProvider({ children }) {
-  const { firebaseUser } = useAuth()
+  const { currentUser, convexUser, authLoading } = useAuth()
+  const clientId = convexUser?.clientId
 
-  // Organizations list
-  const [organizations, setOrganizations] = useState([])
-  const [orgsLoading, setOrgsLoading] = useState(true)
-  const [activeOrg, setActiveOrg] = useState(null)
+  // Realtime Convex Queries
+  const inventoryData = useQuery(
+    api.inventory.getInventory,
+    clientId ? { clientId } : 'skip'
+  )
 
-  // Salesperson Pending Approval Lockout State
-  const [isStaffPending, setIsStaffPending] = useState(false)
-  const [pendingOrgInfo, setPendingOrgInfo] = useState(null)
-  const [checkingApproval, setCheckingApproval] = useState(true)
+  const salesData = useQuery(
+    api.sales.getSales,
+    clientId ? { clientId } : 'skip'
+  )
 
-  // Live collection state for active organization
-  const [products, setProducts] = useState([])
-  const [warehouses, setWarehouses] = useState([])
-  const [stores, setStores] = useState([])
-  const [staff, setStaff] = useState([])
-  const [sales, setSales] = useState([])
-  const [auditLogs, setAuditLogs] = useState([])
-  const [loading, setLoading] = useState(false)
+  const staffData = useQuery(
+    api.users.getStaff,
+    clientId ? { clientId } : 'skip'
+  )
+
+  const auditLogsData = useQuery(
+    api.audit.getAuditLogs,
+    clientId ? { clientId } : 'skip'
+  )
+
+  // Realtime Convex Mutations
+  const createProductMutation = useMutation(api.inventory.createProduct)
+  const updateProductMutation = useMutation(api.inventory.updateProduct)
+  const deleteProductMutation = useMutation(api.inventory.deleteProduct)
+  const transferStockMutation = useMutation(api.inventory.transferStock)
+  const recordWarehouseInboundMutation = useMutation(api.inventory.recordWarehouseInbound)
+  const recordDirectPurchaseMutation = useMutation(api.inventory.recordDirectPurchase)
+  const recordSaleMutation = useMutation(api.sales.recordSale)
+  const settleCreditSaleMutation = useMutation(api.sales.settleCreditSale)
+  const approveStaffMutation = useMutation(api.users.approveStaff)
+  const rejectStaffMutation = useMutation(api.users.rejectStaff)
+  const deleteStaffMutation = useMutation(api.users.deleteStaff)
+  const updateBusinessNameMutation = useMutation(api.users.updateBusinessName)
+  const logActionMutation = useMutation(api.audit.logAction)
+  const overrideStockMutation = useMutation(api.inventory.overrideStock)
+  const addStoreMutation = useMutation(api.inventory.addStore)
+  const deleteStoreMutation = useMutation(api.inventory.deleteStore)
 
   // Quick switch / session state inside active organization
   const [activeStaffUser, setActiveStaffUser] = useState(null)
   const [isPasscodeLocked, setIsPasscodeLocked] = useState(false)
   const [pendingUser, setPendingUser] = useState(null)
 
-  // ─── 1. Query Organizations & Staff Approval for Authenticated User ────────
-  useEffect(() => {
-    if (!db || !isFirebaseConfigured || !firebaseUser) {
-      setOrganizations([])
-      setActiveOrg(null)
-      setIsStaffPending(false)
-      setPendingOrgInfo(null)
-      setOrgsLoading(false)
-      setCheckingApproval(false)
-      return
+  // Format products with compatibility id field
+  const products = useMemo(() => {
+    if (!inventoryData?.products) return []
+    return inventoryData.products.map((p) => ({
+      ...p,
+      id: p._id,
+    }))
+  }, [inventoryData?.products])
+
+  // Format warehouses with compatibility id field
+  const warehouses = useMemo(() => {
+    if (!inventoryData?.warehouses) return []
+    return inventoryData.warehouses.map((w) => ({
+      ...w,
+      id: w._id,
+      stock: w.stock || {},
+    }))
+  }, [inventoryData?.warehouses])
+
+  // Format stores with compatibility id field
+  const stores = useMemo(() => {
+    if (!inventoryData?.stores) return []
+    return inventoryData.stores.map((s) => ({
+      ...s,
+      id: s._id,
+      stock: s.stock || {},
+    }))
+  }, [inventoryData?.stores])
+
+  // Format sales history with complete customer debt fields
+  const sales = useMemo(() => {
+    if (!salesData) return []
+    return salesData.map((s) => ({
+      ...s,
+      id: s._id,
+      invoiceNumber: s.receiptNumber,
+      totalAmount: s.total,
+      salespersonName: s.staffName,
+      salespersonId: s.staffId,
+      storeName: s.storeName || 'Main Store',
+      customerName: s.customerName || 'Walk-in Customer',
+      customerPhone: s.customerPhone || '',
+      timestamp: s.createdAt,
+    }))
+  }, [salesData])
+
+  // Format staff list
+  const staff = useMemo(() => {
+    if (!staffData) return []
+    return staffData.map((st) => ({
+      ...st,
+      id: st._id,
+      active: st.status === 'approved',
+      passcode: '1234',
+    }))
+  }, [staffData])
+
+  // Format audit trail logs
+  const auditLogs = useMemo(() => {
+    if (!auditLogsData) return []
+    return auditLogsData.map((l) => ({
+      ...l,
+      id: l._id,
+    }))
+  }, [auditLogsData])
+
+  // Active Organization Details
+  const activeOrg = useMemo(() => {
+    if (!convexUser?.client) return null
+    return {
+      ...convexUser.client,
+      id: convexUser.client._id,
+      businessName: convexUser.client.name,
+      name: convexUser.client.name,
+      companyCode: convexUser.client.companyCode,
     }
+  }, [convexUser?.client])
 
-    setOrgsLoading(true)
-    setCheckingApproval(true)
+  const organizations = useMemo(() => (activeOrg ? [activeOrg] : []), [activeOrg])
+  const companyCode = activeOrg?.companyCode || ''
+  const tenantName = activeOrg?.name || 'OMESTOCK'
 
-    const unsubs = []
-    const clientsRef = collection(db, 'clients')
-    const userDocRef = doc(db, 'users', firebaseUser.uid)
+  const loading =
+    authLoading ||
+    (Boolean(clientId) &&
+      (inventoryData === undefined || salesData === undefined || staffData === undefined))
 
-    // A. Listen to top-level /users/{uid} document for role, orgId, and approval status
-    const unsubUserDoc = onSnapshot(userDocRef, async (userSnap) => {
-      if (userSnap.exists()) {
-        const uData = userSnap.data()
-        if (uData.role === 'salesperson') {
-          if (uData.status === 'pending' || uData.status === 'rejected') {
-            setIsStaffPending(true)
-            setPendingOrgInfo({
-              id: uData.orgId,
-              name: uData.orgName || 'Your Organization',
-              companyCode: uData.companyCode || '------',
-              status: uData.status,
-            })
-            setCheckingApproval(false)
-          } else if (uData.status === 'approved') {
-            setIsStaffPending(false)
-            setPendingOrgInfo(null)
-            setCheckingApproval(false)
-          }
-        } else if (uData.role === 'owner') {
-          setIsStaffPending(false)
-          setPendingOrgInfo(null)
-          setCheckingApproval(false)
-        }
-      }
-    }, (err) => {
-      console.warn('Error reading user profile doc:', err)
-    })
-    unsubs.push(unsubUserDoc)
-
-    // B. Query organizations where user is owner OR member
-    const ownerQuery = query(clientsRef, where('ownerUid', '==', firebaseUser.uid))
-    const userEmail = (firebaseUser.email || '').toLowerCase()
-    const memberQuery = userEmail ? query(clientsRef, where('members', 'array-contains', userEmail)) : null
-
-    let ownedOrgs = []
-    let memberOrgs = []
-
-    const mergeAndSetOrgs = async () => {
-      const orgMap = new Map()
-      ownedOrgs.forEach(o => orgMap.set(o.id, o))
-      memberOrgs.forEach(o => {
-        if (!orgMap.has(o.id)) orgMap.set(o.id, o)
-      })
-      const merged = Array.from(orgMap.values())
-
-      // Auto-backfill 6-digit companyCode if missing on any organization
-      for (const org of merged) {
-        if (!org.companyCode) {
-          const newCode = generateCompanyCode()
-          org.companyCode = newCode
-          try {
-            await updateDoc(doc(db, 'clients', org.id), { companyCode: newCode })
-          } catch (e) {
-            console.warn('Could not backfill company code:', e)
-          }
-        }
-      }
-
-      setOrganizations(merged)
-      setOrgsLoading(false)
-
-      // If user is owner of any organization, they are not pending
-      const isUserOwnerOfAny = merged.some(o => o.ownerUid === firebaseUser.uid)
-      if (isUserOwnerOfAny) {
-        setIsStaffPending(false)
-        setPendingOrgInfo(null)
-        setCheckingApproval(false)
-      }
-
-      // Check staff collection in member orgs to see if user is pending approval
-      if (!isUserOwnerOfAny && merged.length > 0) {
-        for (const org of merged) {
-          try {
-            const staffQ = query(
-              collection(db, 'clients', org.id, 'staff'),
-              where('email', '==', userEmail)
-            )
-            const staffSnap = await getDocs(staffQ)
-            if (!staffSnap.empty) {
-              const staffData = staffSnap.docs[0].data()
-              if (staffData.status === 'pending' || (staffData.active === false && staffData.status !== 'approved')) {
-                setIsStaffPending(true)
-                setPendingOrgInfo({
-                  id: org.id,
-                  name: org.name || org.businessName,
-                  companyCode: org.companyCode,
-                  status: 'pending',
-                })
-                setCheckingApproval(false)
-                return
-              } else if (staffData.status === 'approved' || staffData.active === true) {
-                setIsStaffPending(false)
-                setPendingOrgInfo(null)
-                setCheckingApproval(false)
-                if (!activeOrg) {
-                  setActiveOrg(org)
-                  localStorage.setItem('omestock_active_org_id', org.id)
-                }
-                return
-              }
-            }
-          } catch (e) {
-            console.warn('Staff query error:', e)
-          }
-        }
-      }
-
-      setCheckingApproval(false)
-
-      // Auto-restore previously selected active organization from localStorage
-      const savedOrgId = localStorage.getItem('omestock_active_org_id')
-      if (savedOrgId) {
-        const found = merged.find(o => o.id === savedOrgId)
-        if (found) {
-          setActiveOrg(found)
-          return
-        }
-      }
-
-      // If exactly 1 organization exists and none active, auto-select it
-      if (merged.length === 1 && !activeOrg) {
-        setActiveOrg(merged[0])
-        localStorage.setItem('omestock_active_org_id', merged[0].id)
-      }
-    }
-
-    const unsubOwner = onSnapshot(ownerQuery, (snap) => {
-      ownedOrgs = snap.docs.map(d => ({ id: d.id, ...d.data() }))
-      mergeAndSetOrgs()
-    }, (err) => {
-      console.error('Owner organizations listener error:', err)
-      setOrgsLoading(false)
-      setCheckingApproval(false)
-    })
-    unsubs.push(unsubOwner)
-
-    if (memberQuery) {
-      const unsubMember = onSnapshot(memberQuery, (snap) => {
-        memberOrgs = snap.docs.map(d => ({ id: d.id, ...d.data() }))
-        mergeAndSetOrgs()
-      }, (err) => {
-        console.error('Member organizations listener error:', err)
-        setOrgsLoading(false)
-        setCheckingApproval(false)
-      })
-      unsubs.push(unsubMember)
-    }
-
-    return () => unsubs.forEach(u => u())
-  }, [firebaseUser?.uid, firebaseUser?.email])
-
-  // Manual refresh of approval status
-  const refreshApprovalStatus = useCallback(async () => {
-    if (!db || !firebaseUser) return
-    setCheckingApproval(true)
-    try {
-      const userSnap = await getDoc(doc(db, 'users', firebaseUser.uid))
-      if (userSnap.exists()) {
-        const uData = userSnap.data()
-        if (uData.role === 'salesperson') {
-          if (uData.status === 'pending' || uData.status === 'rejected') {
-            setIsStaffPending(true)
-            setPendingOrgInfo({
-              id: uData.orgId,
-              name: uData.orgName || 'Your Organization',
-              companyCode: uData.companyCode || '------',
-              status: uData.status,
-            })
-          } else if (uData.status === 'approved') {
-            setIsStaffPending(false)
-            setPendingOrgInfo(null)
-          }
-        }
-      }
-    } catch (err) {
-      console.error('refreshApprovalStatus failed:', err)
-    } finally {
-      setCheckingApproval(false)
-    }
-  }, [firebaseUser])
-
-  // Select active organization
-  const selectOrganization = (org) => {
-    setActiveOrg(org)
-    if (org?.id) {
-      localStorage.setItem('omestock_active_org_id', org.id)
-    } else {
-      localStorage.removeItem('omestock_active_org_id')
-    }
-  }
-
-  // Clear active organization (return to Org Hub)
-  const clearActiveOrganization = () => {
-    setActiveOrg(null)
-    localStorage.removeItem('omestock_active_org_id')
-  }
-
-  // ─── 2. Create New Organization ───────────────────────────────────────────
-  const createOrganization = async ({ name, currency = 'ETB', initialStoreName, storeLocation }) => {
-    if (!db || !firebaseUser) throw new Error('Database or user not available')
-    const orgId = `org-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`
-    const orgRef = doc(db, 'clients', orgId)
-    const companyCode = generateCompanyCode()
-
-    const orgData = {
-      id: orgId,
-      name: name.trim(),
-      businessName: name.trim(),
-      companyCode,
-      ownerUid: firebaseUser.uid,
-      ownerEmail: firebaseUser.email,
-      currency: currency || 'ETB',
-      members: [firebaseUser.email.toLowerCase()],
-      createdAt: new Date().toISOString(),
-      setupComplete: true,
-    }
-
-    await setDoc(orgRef, orgData)
-
-    // Also update /users/{uid} document
-    await setDoc(doc(db, 'users', firebaseUser.uid), {
-      uid: firebaseUser.uid,
-      name: firebaseUser.displayName || name.trim(),
-      email: firebaseUser.email.toLowerCase(),
-      role: 'owner',
-      orgId,
-      companyCode,
-      status: 'approved',
-      createdAt: new Date().toISOString(),
-    }, { merge: true })
-
-    // Provision Central Warehouse
-    const whRef = doc(collection(db, 'clients', orgId, 'warehouses'))
-    await setDoc(whRef, {
-      name: 'Central Warehouse',
-      location: 'Main Distribution Hub',
-      isCentral: true,
-      stock: {},
-    })
-
-    // Provision Initial Store
-    const storeName = initialStoreName?.trim() || 'Main Branch'
-    const storeRef = doc(collection(db, 'clients', orgId, 'stores'))
-    await setDoc(storeRef, {
-      name: storeName,
-      location: storeLocation?.trim() || 'Primary Storefront',
-      isWarehouse: false,
-      stock: {},
-    })
-
-    // Provision Owner Staff Record
-    const staffRef = doc(collection(db, 'clients', orgId, 'staff'))
-    await setDoc(staffRef, {
-      name: firebaseUser.displayName || 'Business Owner',
-      email: firebaseUser.email.toLowerCase(),
-      role: 'owner',
-      status: 'approved',
-      storeId: null,
-      passcode: '0000',
-      active: true,
-      totalCommissionsEarned: 0,
-    })
-
-    // Audit log
-    const auditRef = doc(collection(db, 'clients', orgId, 'audit_logs'))
-    await setDoc(auditRef, {
-      actorId: firebaseUser.uid,
-      actorName: firebaseUser.displayName || firebaseUser.email,
-      role: 'owner',
-      action: 'ORGANIZATION_CREATED',
-      description: `Created organization "${name.trim()}" with code ${companyCode} and primary store "${storeName}"`,
-      target: orgId,
-      timestamp: new Date().toISOString(),
-    })
-
-    selectOrganization(orgData)
-    return orgData
-  }
-
-  // ─── 3. Real-Time Listeners for active organization ───────────────────────
-  const clientId = activeOrg?.id
-  const tenantName = activeOrg?.name || activeOrg?.businessName || 'OMESTOCK'
-
-
-  useEffect(() => {
-    if (!db || !isFirebaseConfigured || !clientId) {
-      setProducts([])
-      setWarehouses([])
-      setStores([])
-      setStaff([])
-      setSales([])
-      setAuditLogs([])
-      setLoading(false)
-      return
-    }
-
-    setLoading(true)
-    let resolved = 0
-    const needed = 6
-    const tryResolve = () => {
-      resolved++
-      if (resolved >= needed) setLoading(false)
-    }
-
-    const cols = getTenantCollections(db, clientId)
-    const unsubs = [
-      onSnapshot(cols.products, (snap) => {
-        setProducts(snap.docs.map(d => ({ id: d.id, ...d.data() })))
-        tryResolve()
-      }, () => tryResolve()),
-
-      onSnapshot(cols.warehouses, (snap) => {
-        setWarehouses(snap.docs.map(d => ({ id: d.id, ...d.data() })))
-        tryResolve()
-      }, () => tryResolve()),
-
-      onSnapshot(cols.stores, (snap) => {
-        setStores(snap.docs.map(d => ({ id: d.id, ...d.data() })))
-        tryResolve()
-      }, () => tryResolve()),
-
-      onSnapshot(cols.staff, (snap) => {
-        setStaff(snap.docs.map(d => ({ id: d.id, ...d.data(), avatar: getAvatar(d.data().name, d.data().email) })))
-        tryResolve()
-      }, () => tryResolve()),
-
-      onSnapshot(
-        query(cols.sales, orderBy('timestamp', 'desc'), limit(500)),
-        (snap) => {
-          setSales(snap.docs.map(d => ({ id: d.id, ...d.data(), timestamp: toIso(d.data().timestamp) })))
-          tryResolve()
-        },
-        () => tryResolve()
-      ),
-
-      onSnapshot(
-        query(cols.auditLogs, orderBy('timestamp', 'desc'), limit(300)),
-        (snap) => {
-          setAuditLogs(snap.docs.map(d => ({ id: d.id, ...d.data(), timestamp: toIso(d.data().timestamp) })))
-          tryResolve()
-        },
-        () => tryResolve()
-      ),
-    ]
-
-    return () => unsubs.forEach(u => u())
-  }, [clientId])
-
-  // ─── 4. Current User & Permissions ─────────────────────────────────────────
-  const isOrgOwner = activeOrg?.ownerUid === firebaseUser?.uid
-  const matchingStaff = staff.find(s => s.email?.toLowerCase() === firebaseUser?.email?.toLowerCase())
-
-  // Effective current user (either actively switched staff member or the authenticated owner/staff)
-  const currentUser = activeStaffUser || {
-    id: matchingStaff?.id || firebaseUser?.uid || 'user-default',
-    name: matchingStaff?.name || firebaseUser?.displayName || firebaseUser?.email?.split('@')[0] || 'User',
-    email: firebaseUser?.email || '',
-    role: isOrgOwner ? 'owner' : (matchingStaff?.role || 'salesperson'),
-    storeId: matchingStaff?.storeId || null,
-    avatar: getAvatar(matchingStaff?.name || firebaseUser?.displayName, firebaseUser?.email),
-    passcode: matchingStaff?.passcode || '0000',
-  }
-
-  const isOwner = currentUser.role === 'owner' || isOrgOwner
-  const isSalesperson = currentUser.role === 'salesperson'
-
-  const permissions = {
-    isOwner,
-    isSalesperson,
-    canViewAuditTrail: isOwner,
-    canManageStaff: isOwner,
-    canViewAnalytics: isOwner,
-    canAccessInventoryFlow: true,
-    canProcessSale: true,
-  }
-
-  // Switch active staff member on POS terminal
-  const switchUser = (userId) => {
-    const user = staff.find(u => u.id === userId)
-    if (!user) return
-    if (user.role === 'salesperson') {
-      setPendingUser(user)
-      setIsPasscodeLocked(true)
-    } else {
-      setActiveStaffUser(user)
-      setIsPasscodeLocked(false)
-      setPendingUser(null)
-    }
-  }
-
-  const verifyPasscode = (pin) => {
-    const targetUser = pendingUser || currentUser
-    if (targetUser && targetUser.passcode === pin) {
-      if (pendingUser) {
-        setActiveStaffUser(pendingUser)
-        setPendingUser(null)
-      }
-      setIsPasscodeLocked(false)
-      return { success: true }
-    }
-    return { success: false, error: 'Incorrect 4-digit passcode' }
-  }
-
-  const lockSession = () => setIsPasscodeLocked(true)
-
-  // ─── 5. Audit Logger ───────────────────────────────────────────────────────
+  // ─── Audit Logger ────────────────────────────────────────────────────────
   const logAuditAction = async ({ actorId, actorName, role, action, description, target }) => {
-    if (!db || !clientId) return
+    if (!clientId) return
     try {
-      const cols = getTenantCollections(db, clientId)
-      await addDoc(cols.auditLogs, {
-        actorId: actorId || currentUser.id,
-        actorName: actorName || currentUser.name,
-        role: role || currentUser.role,
+      await logActionMutation({
+        clientId,
+        actorId: actorId || currentUser?.id || 'system',
+        actorName: actorName || currentUser?.name || 'System',
+        role: role || currentUser?.role || 'owner',
         action,
         description,
         target: target || 'general',
-        timestamp: new Date().toISOString(),
       })
     } catch (err) {
-      console.error('logAuditAction error:', err)
+      console.warn('logAuditAction error:', err)
     }
   }
 
-  // ─── 6. Store & Warehouse Mutations ────────────────────────────────────────
-  const updateBusinessName = async (newName) => {
-    if (!db || !clientId || !newName.trim()) return
-    await updateDoc(doc(db, 'clients', clientId), {
-      name: newName.trim(),
-      businessName: newName.trim(),
-    })
-    setActiveOrg(prev => prev ? { ...prev, name: newName.trim(), businessName: newName.trim() } : prev)
+  // User switching (normal login flow without passcode lock)
+  const switchUser = (userId) => {
+    const user = staff.find((u) => u.id === userId)
+    if (!user) return
+    setActiveStaffUser(user)
+    setIsPasscodeLocked(false)
+    setPendingUser(null)
   }
 
-  const recordSale = async (saleData, currentStaff) => {
-    if (!db || !clientId) return null
+  const verifyPasscode = () => {
+    setIsPasscodeLocked(false)
+    return { success: true }
+  }
+
+  const lockSession = () => {}
+
+  // ─── Inventory Actions ───────────────────────────────────────────────────
+
+  const createProduct = async (productData) => {
+    if (!clientId) return null
     try {
-      const cols = getTenantCollections(db, clientId)
-      const batch = writeBatch(db)
-
-      const saleRef = doc(cols.sales)
-      const invoiceNumber = `INV-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`
-      const commissionTotal = saleData.items.reduce((sum, item) => sum + (item.commissionAmount || 0), 0)
-      const timestamp = new Date().toISOString()
-
-      const newSale = {
-        invoiceNumber,
-        storeId: saleData.storeId,
-        storeName: saleData.storeName,
-        salespersonId: currentStaff?.id || currentUser.id,
-        salespersonName: currentStaff?.name || currentUser.name,
-        items: saleData.items,
-        subtotal: saleData.totalAmount,
-        totalAmount: saleData.totalAmount,
-        paymentMethod: saleData.paymentMethod,
-        bankProvider: saleData.bankProvider || null,
-        bankRef: saleData.bankRef || null,
-        paymentStatus: saleData.paymentMethod === 'Credit' ? 'Unpaid' : 'Paid',
-        customerName: saleData.customerName || 'Walk-in Customer',
-        customerPhone: saleData.customerPhone || '',
-        commissionTotal,
-        timestamp,
-      }
-
-      batch.set(saleRef, newSale)
-
-      const storeRef = doc(db, 'clients', clientId, 'stores', saleData.storeId)
-      const stockUpdates = {}
-      saleData.items.forEach(item => {
-        stockUpdates[`stock.${item.productId}`] = increment(-item.quantity)
+      const res = await createProductMutation({
+        clientId,
+        name: productData.name.trim(),
+        category: productData.category?.trim() || 'General',
+        sellingPrice: parseFloat(productData.sellingPrice) || 0,
+        costPrice: parseFloat(productData.costPrice) || 0,
+        defaultCommissionRate: parseFloat(productData.defaultCommissionRate) || 5,
+        minStockThreshold: parseInt(productData.minStockThreshold, 10) || 10,
+        initialWarehouseId: productData.initialWarehouseId || undefined,
+        initialStoreId: productData.initialStoreId || undefined,
+        initialQuantity: productData.initialQuantity !== undefined ? parseInt(productData.initialQuantity, 10) : undefined,
       })
-      batch.update(storeRef, stockUpdates)
-
-      if (currentStaff?.id && commissionTotal > 0) {
-        const staffRef = doc(db, 'clients', clientId, 'staff', currentStaff.id)
-        batch.update(staffRef, { totalCommissionsEarned: increment(commissionTotal) })
+      if (res) {
+        await logAuditAction({
+          action: 'PRODUCT_CREATED',
+          description: `Created catalog product "${productData.name}"${productData.initialQuantity ? ` with ${productData.initialQuantity} units` : ''}`,
+          target: res._id,
+        })
       }
-
-      await batch.commit()
-
-      await logAuditAction({
-        action: 'SALE_RECORDED',
-        description: `Recorded ${saleData.paymentMethod} sale ${invoiceNumber} (ETB ${saleData.totalAmount.toFixed(2)})`,
-        target: saleData.storeId,
-      })
-
-      return { id: saleRef.id, ...newSale }
+      return res ? { ...res, id: res._id } : null
     } catch (err) {
-      console.error('recordSale failed:', err)
-      throw err
+      console.error('createProduct failed:', err)
+      return null
     }
   }
 
-  const settleCreditSale = async (saleId, settledPaymentMethod = 'Cash', bankProvider = null, currentStaff) => {
-    if (!db || !clientId) return
+  const updateProduct = async (productId, updates) => {
     try {
-      const saleRef = doc(db, 'clients', clientId, 'sales', saleId)
-      await updateDoc(saleRef, {
-        paymentStatus: 'Paid',
-        settledAt: new Date().toISOString(),
-        settledPaymentMethod,
-        settledBankProvider: settledPaymentMethod === 'Banking' ? bankProvider : null,
+      await updateProductMutation({
+        productId,
+        name: updates.name,
+        category: updates.category,
+        sellingPrice: updates.sellingPrice !== undefined ? parseFloat(updates.sellingPrice) : undefined,
+        costPrice: updates.costPrice !== undefined ? parseFloat(updates.costPrice) : undefined,
+        defaultCommissionRate:
+          updates.defaultCommissionRate !== undefined ? parseFloat(updates.defaultCommissionRate) : undefined,
+        minStockThreshold:
+          updates.minStockThreshold !== undefined ? parseInt(updates.minStockThreshold, 10) : undefined,
       })
       await logAuditAction({
-        action: 'CREDIT_SALE_SETTLED',
-        description: `Settled credit sale ${saleId} via ${settledPaymentMethod}`,
-        target: saleId,
+        action: 'PRODUCT_UPDATED',
+        description: `Updated product properties`,
+        target: productId,
       })
+      return true
     } catch (err) {
-      console.error('settleCreditSale failed:', err)
+      console.error('updateProduct failed:', err)
+      return false
     }
   }
 
-  const transferStock = async ({ fromWarehouseId, toStoreId, productId, quantity }) => {
-    if (!db || !clientId) return false
-    const qty = parseInt(quantity, 10)
-    if (!qty || qty <= 0) return false
+  const deleteProduct = async (productId) => {
     try {
-      const batch = writeBatch(db)
-      batch.update(doc(db, 'clients', clientId, 'warehouses', fromWarehouseId), { [`stock.${productId}`]: increment(-qty) })
-      batch.update(doc(db, 'clients', clientId, 'stores', toStoreId), { [`stock.${productId}`]: increment(qty) })
-      await batch.commit()
+      await deleteProductMutation({ productId })
+      await logAuditAction({
+        action: 'PRODUCT_DELETED',
+        description: `Deleted catalog product`,
+        target: productId,
+      })
+      return true
+    } catch (err) {
+      console.error('deleteProduct failed:', err)
+      return false
+    }
+  }
 
+  const transferStock = async ({ fromWarehouseId, fromStoreId, toStoreId, toWarehouseId, productId, quantity, items }) => {
+    try {
+      const transferItems =
+        Array.isArray(items) && items.length > 0
+          ? items
+              .filter((it) => parseInt(it.quantity, 10) > 0 && it.productId)
+              .map((it) => ({
+                productId: it.productId,
+                productName: it.productName || undefined,
+                quantity: parseInt(it.quantity, 10),
+              }))
+          : productId && parseInt(quantity, 10) > 0
+          ? [{ productId, quantity: parseInt(quantity, 10) }]
+          : []
+
+      if (transferItems.length === 0) return false
+
+      await transferStockMutation({
+        fromWarehouseId: fromWarehouseId || undefined,
+        fromStoreId: fromStoreId || undefined,
+        toStoreId: toStoreId || undefined,
+        toWarehouseId: toWarehouseId || undefined,
+        items: transferItems,
+      })
+
+      const totalUnits = transferItems.reduce((acc, it) => acc + it.quantity, 0)
       await logAuditAction({
         action: 'STOCK_TRANSFER',
-        description: `Transferred ${qty}x of ${productId} from warehouse to store`,
-        target: `${fromWarehouseId} -> ${toStoreId}`,
+        description: `Transferred ${totalUnits} units across ${transferItems.length} product(s)`,
+        target: `${fromWarehouseId || fromStoreId} -> ${toWarehouseId || toStoreId}`,
       })
       return true
     } catch (err) {
       console.error('transferStock failed:', err)
+      alert(err?.message || 'Stock transfer failed.')
       return false
     }
   }
 
-  const recordDirectPurchase = async ({ storeId, productId, quantity, costPerUnit, paymentMethod, bankProvider, supplierName }) => {
-    if (!db || !clientId) return false
-    const qty = parseInt(quantity, 10)
-    const cost = parseFloat(costPerUnit) || 0
+  const recordWarehouseInbound = async ({
+    warehouseId,
+    productId,
+    quantity,
+    costPerUnit,
+    items,
+    paymentMethod,
+    bankProvider,
+    supplierName,
+  }) => {
     try {
-      await updateDoc(doc(db, 'clients', clientId, 'stores', storeId), { [`stock.${productId}`]: increment(qty) })
-      await logAuditAction({
-        action: 'DIRECT_STORE_PURCHASE',
-        description: `Direct purchase: ${qty}x of ${productId} (ETB ${(qty * cost).toFixed(2)})`,
-        target: storeId,
+      const inboundItems =
+        Array.isArray(items) && items.length > 0
+          ? items
+              .filter((it) => parseInt(it.quantity, 10) > 0 && it.productId)
+              .map((it) => ({
+                productId: it.productId,
+                productName: it.productName || undefined,
+                quantity: parseInt(it.quantity, 10),
+                costPerUnit: parseFloat(it.costPerUnit) || 0,
+              }))
+          : productId && parseInt(quantity, 10) > 0
+          ? [
+              {
+                productId,
+                quantity: parseInt(quantity, 10),
+                costPerUnit: parseFloat(costPerUnit) || 0,
+              },
+            ]
+          : []
+
+      if (inboundItems.length === 0) return false
+
+      await recordWarehouseInboundMutation({
+        warehouseId,
+        items: inboundItems,
+        paymentMethod: paymentMethod || 'Cash',
+        bankProvider: bankProvider || undefined,
+        supplierName: supplierName || undefined,
       })
-      return true
-    } catch (err) {
-      console.error('recordDirectPurchase failed:', err)
-      return false
-    }
-  }
 
-  const recordWarehouseInbound = async ({ warehouseId, productId, quantity, costPerUnit, paymentMethod, bankProvider, supplierName }) => {
-    if (!db || !clientId) return false
-    const qty = parseInt(quantity, 10)
-    const cost = parseFloat(costPerUnit) || 0
-    try {
-      await updateDoc(doc(db, 'clients', clientId, 'warehouses', warehouseId), { [`stock.${productId}`]: increment(qty) })
+      const totalUnits = inboundItems.reduce((acc, it) => acc + it.quantity, 0)
       await logAuditAction({
         action: 'WAREHOUSE_INBOUND',
-        description: `Inbound restock: ${qty}x of ${productId} (ETB ${(qty * cost).toFixed(2)})`,
+        description: `Warehouse inbound restock: ${totalUnits} units (via ${paymentMethod || 'Cash'}${supplierName ? `, Supplier: ${supplierName}` : ''})`,
         target: warehouseId,
       })
       return true
@@ -645,70 +338,214 @@ export function TenantProvider({ children }) {
     }
   }
 
-  const createProduct = async ({ name, category, sellingPrice, costPrice, defaultCommissionRate, minStockThreshold }) => {
-    if (!db || !clientId) return null
+  const recordDirectPurchase = async ({
+    storeId,
+    productId,
+    quantity,
+    costPerUnit,
+    items,
+    paymentMethod,
+    bankProvider,
+    supplierName,
+  }) => {
     try {
-      const cols = getTenantCollections(db, clientId)
-      const newProd = {
-        name,
-        category: category || 'General',
-        sellingPrice: parseFloat(sellingPrice) || 0,
-        costPrice: parseFloat(costPrice) || 0,
-        defaultCommissionRate: parseFloat(defaultCommissionRate) || 5,
-        minStockThreshold: parseInt(minStockThreshold, 10) || 10,
-      }
-      const prodRef = await addDoc(cols.products, newProd)
-      const newId = prodRef.id
+      const purchaseItems =
+        Array.isArray(items) && items.length > 0
+          ? items
+              .filter((it) => parseInt(it.quantity, 10) > 0 && it.productId)
+              .map((it) => ({
+                productId: it.productId,
+                productName: it.productName || undefined,
+                quantity: parseInt(it.quantity, 10),
+                costPerUnit: parseFloat(it.costPerUnit) || 0,
+              }))
+          : productId && parseInt(quantity, 10) > 0
+          ? [
+              {
+                productId,
+                quantity: parseInt(quantity, 10),
+                costPerUnit: parseFloat(costPerUnit) || 0,
+              },
+            ]
+          : []
 
-      if (warehouses.length > 0 || stores.length > 0) {
-        const batch = writeBatch(db)
-        warehouses.forEach(wh => {
-          batch.update(doc(db, 'clients', clientId, 'warehouses', wh.id), { [`stock.${newId}`]: 0 })
-        })
-        stores.forEach(st => {
-          batch.update(doc(db, 'clients', clientId, 'stores', st.id), { [`stock.${newId}`]: 0 })
-        })
-        await batch.commit()
-      }
+      if (purchaseItems.length === 0) return false
 
-      await logAuditAction({
-        action: 'PRODUCT_CREATED',
-        description: `Created catalog product "${newProd.name}"`,
-        target: newId,
+      await recordDirectPurchaseMutation({
+        storeId,
+        items: purchaseItems,
+        paymentMethod: paymentMethod || 'Cash',
+        bankProvider: bankProvider || undefined,
+        supplierName: supplierName || undefined,
       })
-      return { id: newId, ...newProd }
-    } catch (err) {
-      console.error('createProduct failed:', err)
-      return null
-    }
-  }
 
-  const updateProduct = async (productId, updates) => {
-    if (!db || !clientId) return false
-    try {
-      const toUpdate = {}
-      if (updates.sellingPrice !== undefined) toUpdate.sellingPrice = parseFloat(updates.sellingPrice)
-      if (updates.costPrice !== undefined) toUpdate.costPrice = parseFloat(updates.costPrice)
-      if (updates.defaultCommissionRate !== undefined) toUpdate.defaultCommissionRate = parseFloat(updates.defaultCommissionRate)
-      if (updates.minStockThreshold !== undefined) toUpdate.minStockThreshold = parseInt(updates.minStockThreshold, 10)
-      await updateDoc(doc(db, 'clients', clientId, 'products', productId), toUpdate)
+      const totalUnits = purchaseItems.reduce((acc, it) => acc + it.quantity, 0)
+      await logAuditAction({
+        action: 'DIRECT_STORE_PURCHASE',
+        description: `Direct store purchase: ${totalUnits} units (via ${paymentMethod || 'Cash'}${supplierName ? `, Supplier: ${supplierName}` : ''})`,
+        target: storeId,
+      })
       return true
     } catch (err) {
-      console.error('updateProduct failed:', err)
+      console.error('recordDirectPurchase failed:', err)
       return false
     }
   }
 
-  const overrideStock = async ({ locationId, locationType, productId, newQuantity, reason }) => {
-    if (!db || !clientId) return false
-    const newQty = parseInt(newQuantity, 10)
-    if (isNaN(newQty) || newQty < 0) return false
+  // ─── Sales Actions ───────────────────────────────────────────────────────
+
+  const recordSale = async (saleData, currentStaff) => {
+    if (!clientId) return null
     try {
-      const locationPath = locationType === 'warehouse' ? 'warehouses' : 'stores'
-      await updateDoc(doc(db, 'clients', clientId, locationPath, locationId), { [`stock.${productId}`]: newQty })
+      const items = (saleData.items || []).map((it) => ({
+        productId: it.productId,
+        productName: it.productName,
+        quantity: it.quantity,
+        price: it.unitPrice ?? it.price ?? 0,
+        costPrice: it.costPrice,
+        subtotal: (it.unitPrice ?? it.price ?? 0) * it.quantity,
+        commissionAmount: it.commissionAmount || 0,
+      }))
+
+      const commission = items.reduce((sum, it) => sum + (it.commissionAmount || 0), 0)
+
+      const created = await recordSaleMutation({
+        clientId,
+        storeId: saleData.storeId,
+        storeName: saleData.storeName,
+        items,
+        total: saleData.totalAmount,
+        paymentMethod: saleData.paymentMethod || 'Cash',
+        bankProvider: saleData.bankProvider || undefined,
+        bankRef: saleData.bankRef || undefined,
+        customerName: saleData.customerName || undefined,
+        customerPhone: saleData.customerPhone || undefined,
+        staffId: currentStaff?.id || currentUser?.id || 'staff',
+        staffName: currentStaff?.name || currentUser?.name || 'Staff',
+        commission,
+      })
+
+      if (created) {
+        await logAuditAction({
+          action: 'SALE_RECORDED',
+          description: `Recorded ${saleData.paymentMethod} sale ${created.receiptNumber} (ETB ${saleData.totalAmount.toFixed(2)})`,
+          target: saleData.storeId,
+        })
+      }
+
+      return created ? { ...created, id: created._id, invoiceNumber: created.receiptNumber } : null
+    } catch (err) {
+      console.error('recordSale failed:', err)
+      throw err
+    }
+  }
+
+  const settleCreditSale = async (saleId, settledPaymentMethod = 'Cash', bankProvider = null) => {
+    try {
+      await settleCreditSaleMutation({
+        saleId,
+        settledPaymentMethod,
+        settledBankProvider: bankProvider || undefined,
+      })
+
       await logAuditAction({
-        action: 'INVENTORY_OVERRIDE',
-        description: `Override stock for ${productId} at ${locationId} to ${newQty}. Reason: ${reason || 'Physical Count'}`,
+        action: 'CREDIT_SALE_SETTLED',
+        description: `Settled unpaid credit sale via ${settledPaymentMethod}`,
+        target: saleId,
+      })
+      return true
+    } catch (err) {
+      console.error('settleCreditSale failed:', err)
+      return false
+    }
+  }
+
+  // ─── Staff & Business Actions ────────────────────────────────────────────
+
+  const approveStaffMember = async (staffId) => {
+    try {
+      await approveStaffMutation({ staffId })
+      await logAuditAction({
+        action: 'STAFF_UPDATED',
+        description: `Approved salesperson access`,
+        target: staffId,
+      })
+      return true
+    } catch (err) {
+      console.error('approveStaffMember failed:', err)
+      return false
+    }
+  }
+
+  const rejectStaffMember = async (staffId) => {
+    try {
+      await rejectStaffMutation({ staffId })
+      await logAuditAction({
+        action: 'STAFF_UPDATED',
+        description: `Rejected salesperson application`,
+        target: staffId,
+      })
+      return true
+    } catch (err) {
+      console.error('rejectStaffMember failed:', err)
+      return false
+    }
+  }
+
+  const deleteStaffMember = async (staffId) => {
+    try {
+      await deleteStaffMutation({ staffId })
+      await logAuditAction({
+        action: 'STAFF_UPDATED',
+        description: `Removed staff member`,
+        target: staffId,
+      })
+      return true
+    } catch (err) {
+      console.error('deleteStaffMember failed:', err)
+      return false
+    }
+  }
+
+  const saveStaffMember = async (member) => {
+    if (member.id) {
+      if (member.status === 'approved') {
+        return await approveStaffMember(member.id)
+      } else if (member.status === 'rejected') {
+        return await rejectStaffMember(member.id)
+      }
+    }
+    return true
+  }
+
+  const updateBusinessName = async (newName) => {
+    if (!clientId || !newName?.trim()) return
+    try {
+      await updateBusinessNameMutation({
+        clientId,
+        name: newName.trim(),
+      })
+      await logAuditAction({
+        action: 'BUSINESS_NAME_UPDATED',
+        description: `Updated business name to "${newName.trim()}"`,
+        target: clientId,
+      })
+    } catch (err) {
+      console.error('updateBusinessName failed:', err)
+    }
+  }
+
+  const overrideStock = async (locationId, locationName, locationType, productId, productName, newQuantity) => {
+    try {
+      await overrideStockMutation({
+        locationType,
+        locationId,
+        productId,
+        newQuantity: parseInt(newQuantity, 10) || 0,
+      })
+      await logAuditAction({
+        action: 'STOCK_OVERRIDE',
+        description: `Overrode stock for "${productName}" to ${newQuantity} in ${locationName}`,
         target: locationId,
       })
       return true
@@ -719,19 +556,19 @@ export function TenantProvider({ children }) {
   }
 
   const addStore = async ({ name, location }) => {
-    if (!db || !clientId) return null
+    if (!clientId) return null
     try {
-      const cols = getTenantCollections(db, clientId)
-      const initialStock = {}
-      products.forEach(p => { initialStock[p.id] = 0 })
-      const newStore = { name, location: location || 'New Branch', isWarehouse: false, stock: initialStock }
-      const storeRef = await addDoc(cols.stores, newStore)
+      const res = await addStoreMutation({
+        clientId,
+        name: name.trim(),
+        location: location?.trim() || 'Main Branch',
+      })
       await logAuditAction({
         action: 'STORE_CREATED',
-        description: `Created new retail store: "${name}"`,
-        target: storeRef.id,
+        description: `Created new retail store branch "${name.trim()}"`,
+        target: res,
       })
-      return { id: storeRef.id, ...newStore }
+      return res
     } catch (err) {
       console.error('addStore failed:', err)
       return null
@@ -739,12 +576,11 @@ export function TenantProvider({ children }) {
   }
 
   const deleteStore = async (storeId) => {
-    if (!db || !clientId) return false
     try {
-      await deleteDoc(doc(db, 'clients', clientId, 'stores', storeId))
+      await deleteStoreMutation({ storeId })
       await logAuditAction({
         action: 'STORE_DELETED',
-        description: `Deleted retail store ${storeId}`,
+        description: `Deleted retail store branch`,
         target: storeId,
       })
       return true
@@ -754,175 +590,59 @@ export function TenantProvider({ children }) {
     }
   }
 
-  const saveStaffMember = async (staffMember) => {
-    if (!db || !clientId) return
-    try {
-      const cols = getTenantCollections(db, clientId)
-      if (staffMember.id) {
-        const { id, avatar, ...data } = staffMember
-        await updateDoc(doc(db, 'clients', clientId, 'staff', id), data)
-      } else {
-        const { avatar, ...data } = staffMember
-        const newDoc = {
-          ...data,
-          active: true,
-          totalCommissionsEarned: 0,
-          passcode: staffMember.passcode || '1234',
-        }
-        await addDoc(cols.staff, newDoc)
-      }
-    } catch (err) {
-      console.error('saveStaffMember failed:', err)
-    }
-  }
-
-  const approveStaffMember = async (staffMemberId, storeId) => {
-    if (!db || !clientId) return false
-    try {
-      const targetStaff = staff.find(s => s.id === staffMemberId)
-      const staffDocRef = doc(db, 'clients', clientId, 'staff', staffMemberId)
-      
-      const updateData = {
-        status: 'approved',
-        active: true,
-        approvedAt: new Date().toISOString(),
-        approvedBy: firebaseUser?.uid,
-      }
-      if (storeId) {
-        updateData.storeId = storeId
-      }
-
-      await updateDoc(staffDocRef, updateData)
-
-      // Update /users/{uid} document if staff member has linked Firebase Auth UID
-      if (targetStaff?.uid) {
-        try {
-          await updateDoc(doc(db, 'users', targetStaff.uid), {
-            status: 'approved',
-            active: true,
-          })
-        } catch (e) {
-          console.warn('Could not update user doc for approved staff:', e)
-        }
-      }
-
-      await logAuditAction({
-        action: 'STAFF_APPROVED',
-        description: `Approved salesperson access for ${targetStaff?.name || staffMemberId} (${targetStaff?.email || ''})`,
-        target: staffMemberId,
-      })
-      return true
-    } catch (err) {
-      console.error('approveStaffMember failed:', err)
-      return false
-    }
-  }
-
-  const rejectStaffMember = async (staffMemberId) => {
-    if (!db || !clientId) return false
-    try {
-      const targetStaff = staff.find(s => s.id === staffMemberId)
-      const staffDocRef = doc(db, 'clients', clientId, 'staff', staffMemberId)
-
-      await updateDoc(staffDocRef, {
-        status: 'rejected',
-        active: false,
-        rejectedAt: new Date().toISOString(),
-        rejectedBy: firebaseUser?.uid,
-      })
-
-      if (targetStaff?.uid) {
-        try {
-          await updateDoc(doc(db, 'users', targetStaff.uid), {
-            status: 'rejected',
-            active: false,
-          })
-        } catch (e) {
-          console.warn('Could not update user doc for rejected staff:', e)
-        }
-      }
-
-      await logAuditAction({
-        action: 'STAFF_REJECTED',
-        description: `Declined salesperson access request for ${targetStaff?.name || staffMemberId}`,
-        target: staffMemberId,
-      })
-      return true
-    } catch (err) {
-      console.error('rejectStaffMember failed:', err)
-      return false
-    }
-  }
-
-  const updateUserPasscode = async (newPin) => {
-    if (!db || !clientId) return
-    const targetStaff = staff.find(s => s.email?.toLowerCase() === firebaseUser?.email?.toLowerCase())
-    if (targetStaff?.id) {
-      await updateDoc(doc(db, 'clients', clientId, 'staff', targetStaff.id), {
-        passcode: newPin,
-      })
-    }
-  }
-
   return (
-    <TenantContext.Provider value={{
-      organizations,
-      orgsLoading,
-      activeOrg,
-      companyCode: activeOrg?.companyCode,
-      selectOrganization,
-      clearActiveOrganization,
-      createOrganization,
-      clientId,
-      tenantName,
-      currency: activeOrg?.currency || 'ETB',
-      warehouses,
-      stores,
-      products,
-      staff,
-      sales,
-      auditLogs,
-      loading,
-      currentUser,
-      users: staff,
-      isOwner,
-      isSalesperson,
-      permissions,
-      isStaffPending,
-      pendingOrgInfo,
-      checkingApproval,
-      refreshApprovalStatus,
-      approveStaffMember,
-      rejectStaffMember,
-      switchUser,
-      lockSession,
-      isPasscodeLocked,
-      pendingUser,
-      verifyPasscode,
-      recordSale,
-      settleCreditSale,
-      transferStock,
-      recordDirectPurchase,
-      recordWarehouseInbound,
-      createProduct,
-      overrideStock,
-      updateProduct,
-      addStore,
-      deleteStore,
-      saveStaffMember,
-      updateBusinessName,
-      updateUserPasscode,
-      logAuditAction,
-      isFirebaseLive: isFirebaseConfigured,
-    }}>
+    <TenantContext.Provider
+      value={{
+        clientId,
+        tenantName,
+        activeOrg,
+        organizations,
+        companyCode,
+        products,
+        warehouses,
+        stores,
+        sales,
+        staff,
+        auditLogs,
+        loading,
+        isFirebaseLive: true,
+        // Methods
+        createProduct,
+        updateProduct,
+        deleteProduct,
+        transferStock,
+        recordWarehouseInbound,
+        recordDirectPurchase,
+        recordSale,
+        settleCreditSale,
+        overrideStock,
+        addStore,
+        deleteStore,
+        logAuditAction,
+        approveStaffMember,
+        rejectStaffMember,
+        deleteStaffMember,
+        saveStaffMember,
+        updateBusinessName,
+        // POS Passcode / Switch
+        activeStaffUser,
+        isPasscodeLocked,
+        pendingUser,
+        switchUser,
+        verifyPasscode,
+        lockSession,
+        // Compatibility stubs
+        selectOrganization: () => {},
+        clearActiveOrganization: () => {},
+      }}
+    >
       {children}
     </TenantContext.Provider>
   )
 }
 
-
 export function useTenant() {
-  const context = useContext(TenantContext)
-  if (!context) throw new Error('useTenant must be used within a TenantProvider')
-  return context
+  const ctx = useContext(TenantContext)
+  if (!ctx) throw new Error('useTenant must be used within a TenantProvider')
+  return ctx
 }

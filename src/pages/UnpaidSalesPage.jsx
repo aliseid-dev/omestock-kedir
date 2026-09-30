@@ -37,7 +37,7 @@ export function UnpaidSalesPage() {
       s.invoiceNumber.toLowerCase().includes(term) ||
       (s.customerName && s.customerName.toLowerCase().includes(term)) ||
       (s.customerPhone && s.customerPhone.includes(term)) ||
-      s.storeName.toLowerCase().includes(term)
+      ((s.storeName || '')).toLowerCase().includes(term)
     )
   })
 

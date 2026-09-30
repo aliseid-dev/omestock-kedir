@@ -3,7 +3,6 @@ import {
   User,
   Mail,
   ShieldCheck,
-  Lock,
   Building2,
   Key,
   CheckCircle2,
@@ -29,8 +28,7 @@ export function ProfilePage() {
     updateUserProfile,
     sendResetPassword,
     signOutUser,
-    getAvatar,
-    lockSession
+    getAvatar
   } = useAuth()
 
   const {
@@ -38,7 +36,6 @@ export function ProfilePage() {
     currentUser,
     isOwner,
     stores,
-    updateUserPasscode,
     clearActiveOrganization
   } = useTenant()
 
@@ -48,11 +45,6 @@ export function ProfilePage() {
   const [nameSuccess, setNameSuccess] = useState('')
   const [nameError, setNameError] = useState('')
 
-  // PIN editing
-  const [pin, setPin] = useState(currentUser?.passcode || '0000')
-  const [savingPin, setSavingPin] = useState(false)
-  const [pinSuccess, setPinSuccess] = useState('')
-  const [pinError, setPinError] = useState('')
 
   // Password Reset Email
   const [sendingReset, setSendingReset] = useState(false)
@@ -91,28 +83,6 @@ export function ProfilePage() {
     }
   }
 
-  const handleUpdatePin = async (e) => {
-    e.preventDefault()
-    setPinError('')
-    setPinSuccess('')
-    if (!/^\d{4}$/.test(pin)) {
-      setPinError('PIN must be exactly 4 numeric digits.')
-      return
-    }
-
-    setSavingPin(true)
-    try {
-      if (updateUserPasscode) {
-        await updateUserPasscode(pin)
-      }
-      setPinSuccess('POS Unlock PIN updated successfully!')
-      setTimeout(() => setPinSuccess(''), 3000)
-    } catch (err) {
-      setPinError(err?.message || 'Failed to update PIN.')
-    } finally {
-      setSavingPin(false)
-    }
-  }
 
   const handleSendResetEmail = async () => {
     if (!firebaseUser?.email) return
@@ -317,52 +287,6 @@ export function ProfilePage() {
               </Button>
             </div>
 
-            {/* POS 4-Digit Unlock PIN */}
-            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-2.5">
-              <div className="flex items-center gap-2 text-xs font-bold text-slate-900">
-                <ShieldCheck className="w-4 h-4 text-emerald-600" />
-                <span>POS 4-Digit Security PIN</span>
-              </div>
-              <p className="text-xs text-slate-500">
-                Used to quickly unlock the POS terminal or switch cashier accounts without full sign-out.
-              </p>
-
-              {pinSuccess && (
-                <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold flex items-center gap-1.5">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                  <span>{pinSuccess}</span>
-                </div>
-              )}
-
-              {pinError && (
-                <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold flex items-center gap-1.5">
-                  <AlertCircle className="w-3.5 h-3.5 text-rose-500 shrink-0" />
-                  <span>{pinError}</span>
-                </div>
-              )}
-
-              <form onSubmit={handleUpdatePin} className="flex gap-2">
-                <input
-                  type="text"
-                  maxLength={4}
-                  pattern="[0-9]{4}"
-                  required
-                  value={pin}
-                  onChange={(e) => setPin(e.target.value.replace(/[^0-9]/g, '').slice(0, 4))}
-                  className="w-28 text-center text-sm font-mono font-bold tracking-widest px-3 py-2 bg-white border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                  placeholder="0000"
-                />
-                <Button
-                  type="submit"
-                  variant="primary"
-                  size="sm"
-                  disabled={savingPin || pin.length !== 4}
-                  className="flex-1 font-bold text-xs"
-                >
-                  {savingPin ? 'Updating...' : 'Update PIN'}
-                </Button>
-              </form>
-            </div>
 
           </CardContent>
         </Card>
@@ -429,26 +353,16 @@ export function ProfilePage() {
             Active Session & Device
           </h4>
           <p className="text-xs text-slate-500 mt-0.5">
-            Lock terminal with PIN or securely sign out of your OMESTOCK account.
+            Securely sign out of your OMESTOCK account on this device.
           </p>
         </div>
 
         <div className="flex items-center gap-2.5 w-full sm:w-auto">
           <Button
-            variant="outline"
-            size="md"
-            onClick={lockSession}
-            className="flex-1 sm:flex-initial font-bold text-amber-800 border-amber-200 bg-amber-50 hover:bg-amber-100"
-          >
-            <Lock className="w-4 h-4 mr-1.5" />
-            <span>Lock Session</span>
-          </Button>
-
-          <Button
             variant="primary"
             size="md"
             onClick={signOutUser}
-            className="flex-1 sm:flex-initial font-bold bg-rose-600 hover:bg-rose-700 text-white shadow-xs"
+            className="w-full sm:w-auto font-bold bg-rose-600 hover:bg-rose-700 text-white shadow-xs"
           >
             <LogOut className="w-4 h-4 mr-1.5" />
             <span>Sign Out</span>

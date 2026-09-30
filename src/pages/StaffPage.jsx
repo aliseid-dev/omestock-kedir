@@ -408,7 +408,6 @@ export function StaffPage() {
                 <th className="px-6 py-3 font-medium">Employee</th>
                 <th className="px-4 py-3 font-medium">Role</th>
                 <th className="px-4 py-3 font-medium">Assigned Store</th>
-                <th className="px-4 py-3 font-medium text-center">PIN</th>
                 <th className="px-4 py-3 font-medium text-center">Approval Status</th>
                 <th className="px-6 py-3 font-medium text-right">Actions</th>
               </tr>
@@ -432,9 +431,6 @@ export function StaffPage() {
                     </td>
                     <td className="px-4 py-3.5">
                       {assignedStore ? assignedStore.name : 'All Locations / Central'}
-                    </td>
-                    <td className="px-4 py-3.5 text-center font-mono font-bold text-slate-700">
-                      <span className="bg-slate-100 px-2 py-1 rounded-md text-[11px]">{member.passcode || '1234'}</span>
                     </td>
                     <td className="px-4 py-3.5 text-center">
                       {isPending ? (
@@ -564,22 +560,6 @@ export function StaffPage() {
             </div>
           )}
 
-          <div>
-            <label className="block font-bold text-slate-700 mb-1">4-Digit Login Passcode (PIN):</label>
-            <input
-              type="text"
-              maxLength={4}
-              pattern="[0-9]{4}"
-              required
-              placeholder="e.g. 1234"
-              value={formData.passcode}
-              onChange={(e) => setFormData({ ...formData, passcode: e.target.value.replace(/[^0-9]/g, '').slice(0, 4) })}
-              className="w-full p-2.5 bg-white border border-slate-300 rounded-xl min-h-[44px] text-base font-mono font-bold tracking-widest text-center text-slate-900"
-            />
-            <p className="text-[10px] text-slate-400 mt-0.5">
-              {formData.role === 'owner' ? 'Used by owner to unlock terminal and verify admin actions' : 'Used by salesperson to unlock the POS terminal'}
-            </p>
-          </div>
 
           <div className="pt-2 flex flex-col-reverse sm:flex-row justify-end gap-2">
             <Button variant="ghost" size="md" onClick={() => setIsModalOpen(false)} className="w-full sm:w-auto">

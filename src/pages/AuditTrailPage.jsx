@@ -33,10 +33,10 @@ export function AuditTrailPage() {
         </div>
         <h2 className="text-lg font-bold text-slate-900">Owner Access Only</h2>
         <p className="text-xs text-slate-500 leading-relaxed">
-          The system audit trail contains confidential staff activities, sales records, and inventory adjustments. Only the verified Business Owner (<span className="font-semibold text-slate-700">Alex Omedla</span>) has permission to review audit logs.
+          The system audit trail contains confidential staff activities, sales records, and inventory adjustments. Only verified Business Owners have permission to review audit logs.
         </p>
         <div className="pt-2">
-          <Badge variant="danger">Role: {currentUser.role} (Unauthorized)</Badge>
+          <Badge variant="danger">Role: {currentUser?.role || 'User'} (Unauthorized)</Badge>
         </div>
       </div>
     )
@@ -46,9 +46,9 @@ export function AuditTrailPage() {
   const filteredLogs = auditLogs.filter(log => {
     const matchesAction = filterAction === 'ALL' || log.action === filterAction
     const matchesSearch =
-      log.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      log.actorName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      log.action.toLowerCase().includes(searchTerm.toLowerCase())
+      (log.description || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (log.actorName || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (log.action || '').toLowerCase().includes(searchTerm.toLowerCase())
     return matchesAction && matchesSearch
   })
 

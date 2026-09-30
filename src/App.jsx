@@ -1,65 +1,76 @@
 import React from 'react'
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
+import { AuthenticateWithRedirectCallback } from '@clerk/clerk-react'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { TenantProvider, useTenant } from './context/TenantContext'
 import { AuthPage } from './pages/AuthPage'
-import { OrganizationHubPage } from './pages/OrganizationHubPage'
+import { RoleOnboardingPage } from './pages/RoleOnboardingPage'
+import { AwaitingApprovalPage } from './pages/AwaitingApprovalPage'
+import { ComingSoonPage } from './pages/ComingSoonPage'
 import { MainLayout } from './components/layout/MainLayout'
-import { DashboardPage } from './pages/DashboardPage'
 import { PosPage } from './pages/PosPage'
 import { InventoryPage } from './pages/InventoryPage'
-import { UnpaidSalesPage } from './pages/UnpaidSalesPage'
 import { StaffPage } from './pages/StaffPage'
+import { UnpaidSalesPage } from './pages/UnpaidSalesPage'
 import { AuditTrailPage } from './pages/AuditTrailPage'
-import { ProfilePage } from './pages/ProfilePage'
-import { AwaitingApprovalPage } from './pages/AwaitingApprovalPage'
 import { Loader2 } from 'lucide-react'
 
 function AppContent() {
-  const { firebaseUser, authLoading } = useAuth()
-  const { activeOrg, isStaffPending, pendingOrgInfo, checkingApproval } = useTenant()
+  const { authLoading, isSignedIn, convexUser, isPending } = useAuth()
+  const location = useLocation()
 
-  // 1. Initial Firebase Auth loading screen
-  if (authLoading || (firebaseUser && checkingApproval)) {
+  // Handle OAuth Redirect Callback (Google, Apple, etc.)
+  if (location.pathname.startsWith('/sso-callback')) {
+    return <AuthenticateWithRedirectCallback />
+  }
+
+  // 1. Initial Authentication & Profile Sync Loading Screen
+  if (authLoading) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-slate-900 text-white gap-3">
-        <div className="w-12 h-12 rounded-2xl bg-white text-slate-900 flex items-center justify-center font-bold text-xl shadow-lg">
-          L
+        <div className="w-12 h-12 rounded-2xl bg-blue-600 text-white flex items-center justify-center font-bold text-xl shadow-lg shadow-blue-500/30">
+          O
         </div>
-        <Loader2 className="w-5 h-5 text-emerald-400 animate-spin" />
-        <p className="text-xs text-slate-400 font-medium">Checking authorization & workspace…</p>
+        <Loader2 className="w-5 h-5 text-blue-400 animate-spin" />
+        <p className="text-xs text-slate-400 font-medium">Connecting to OMESTOCK workspace…</p>
       </div>
     )
   }
 
   // 2. Not logged in -> Show Sign In / Sign Up Page
-  if (!firebaseUser) {
+  if (!isSignedIn) {
     return <AuthPage />
   }
 
-  // 3. STRICT LOCKOUT: If salesperson is pending owner approval, route to dedicated waiting screen
-  if (isStaffPending) {
-    return <AwaitingApprovalPage orgInfo={pendingOrgInfo} />
+  // 3. Logged in via Clerk, but no Convex User profile yet -> Role Selection Onboarding
+  if (convexUser === null) {
+    return <RoleOnboardingPage />
   }
 
-  // 4. User logged in, but no active organization selected -> Show Organizations Hub
-  if (!activeOrg) {
-    return <OrganizationHubPage />
+  // 4. Salesperson registered but awaiting owner approval -> Dedicated Waiting Screen
+  if (isPending) {
+    return <AwaitingApprovalPage />
   }
 
-
-  // 4. Logged in and active organization selected -> Show workspace routes inside MainLayout
+  // 5. Approved Owner or Salesperson -> Core POS, Stock & Staff workspace
   return (
     <Routes>
       <Route path="/" element={<MainLayout />}>
-        <Route index element={<DashboardPage />} />
+        {/* Core operational routes */}
+        <Route index element={<Navigate to="/pos" replace />} />
         <Route path="pos" element={<PosPage />} />
         <Route path="inventory" element={<InventoryPage />} />
-        <Route path="unpaid-sales" element={<UnpaidSalesPage />} />
         <Route path="staff" element={<StaffPage />} />
+        <Route path="unpaid-sales" element={<UnpaidSalesPage />} />
         <Route path="audit-trail" element={<AuditTrailPage />} />
-        <Route path="profile" element={<ProfilePage />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
+
+        {/* Simplified Coming Soon screens for secondary modules */}
+        <Route path="dashboard" element={<ComingSoonPage title="Executive Analytics Dashboard" />} />
+        <Route path="profile" element={<ComingSoonPage title="User & Enterprise Profile" />} />
+        <Route path="org-hub" element={<ComingSoonPage title="Multi-Branch Organization Hub" />} />
+
+        {/* Catch-all redirect to POS */}
+        <Route path="*" element={<Navigate to="/pos" replace />} />
       </Route>
     </Routes>
   )

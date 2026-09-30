@@ -12,7 +12,6 @@ import {
   CheckCircle2,
   Menu,
   X,
-  Lock,
   LogOut,
   Loader2,
   Settings,
@@ -24,7 +23,6 @@ import {
 import { useAuth } from '../../context/AuthContext'
 import { useTenant } from '../../context/TenantContext'
 import { Badge } from '../ui/Badge'
-import { PasscodeModal } from '../auth/PasscodeModal'
 
 export function MainLayout() {
   const { currentUser, users, switchUser, permissions, isOwner, lockSession, signOutUser, firebaseUser } = useAuth()
@@ -84,14 +82,8 @@ export function MainLayout() {
     setShowBizSettings(false)
   }
 
-  // Base navigation items
+  // Base navigation items - Core operational focus: POS, Stock, Unpaid Sales, Staff & Audit Trail
   const navItems = [
-    {
-      to: '/',
-      label: 'Reports',
-      icon: LayoutDashboard,
-      ownerOnly: true,
-    },
     {
       to: '/pos',
       label: 'POS',
@@ -124,10 +116,18 @@ export function MainLayout() {
       ownerOnly: true,
     },
     {
+      to: '/dashboard',
+      label: 'Reports',
+      icon: LayoutDashboard,
+      ownerOnly: true,
+      badge: 'Soon',
+    },
+    {
       to: '/profile',
       label: 'Profile',
       icon: User,
       ownerOnly: false,
+      badge: 'Soon',
     },
   ]
 
@@ -136,15 +136,13 @@ export function MainLayout() {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 antialiased selection:bg-emerald-100 selection:text-emerald-900 flex flex-col lg:flex-row">
       
-      {/* 4-Digit Passcode Modal Guard */}
-      <PasscodeModal />
 
       {/* ─── Desktop Left Navigation Sidebar (Visible on lg+ screens) ─── */}
       <aside className="hidden lg:flex lg:flex-col lg:w-64 xl:w-72 lg:fixed lg:inset-y-0 lg:z-40 bg-white border-r border-slate-200">
         
         {/* Brand & Active Organization Header */}
         <div className="p-5 border-b border-slate-100 space-y-4">
-          <Link to={isOwner ? '/' : '/pos'} className="flex items-center gap-3 group">
+          <Link to="/pos" className="flex items-center gap-3 group">
             <div className="w-10 h-10 rounded-2xl bg-slate-900 text-white flex items-center justify-center font-black text-xl shadow-xs group-hover:bg-emerald-600 transition-colors">
               O
             </div>
@@ -287,20 +285,11 @@ export function MainLayout() {
             </div>
           </Link>
 
-          <div className="flex items-center gap-2 pt-1 border-t border-slate-200/60">
-            <button
-              onClick={lockSession}
-              title="Lock POS Terminal"
-              className="flex-1 flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-xl bg-white hover:bg-amber-50 text-slate-600 hover:text-amber-800 border border-slate-200 text-xs font-bold transition-colors"
-            >
-              <Lock className="w-3.5 h-3.5 text-slate-500" />
-              <span>Lock</span>
-            </button>
-
+          <div className="pt-1 border-t border-slate-200/60">
             <button
               onClick={signOutUser}
               title="Sign Out"
-              className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-white hover:bg-rose-50 text-slate-600 hover:text-rose-700 border border-slate-200 text-xs font-bold transition-colors"
+              className="w-full flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-white hover:bg-rose-50 text-slate-600 hover:text-rose-700 border border-slate-200 text-xs font-bold transition-colors cursor-pointer"
             >
               <LogOut className="w-3.5 h-3.5 text-slate-500" />
               <span>Sign Out</span>
@@ -366,7 +355,7 @@ export function MainLayout() {
                 <Link
                   to="/profile"
                   onClick={() => setShowUserMenu(false)}
-                  className="flex-1 text-center py-1.5 px-2 bg-slate-50 hover:bg-slate-100 text-xs font-bold text-slate-700 rounded-xl border border-slate-200"
+                  className="flex-1 text-center py-1.5 px-3 bg-slate-50 hover:bg-slate-100 text-xs font-bold text-slate-700 rounded-xl border border-slate-200"
                 >
                   My Profile
                 </Link>
@@ -374,22 +363,11 @@ export function MainLayout() {
                 <button
                   onClick={() => {
                     setShowUserMenu(false)
-                    lockSession()
-                  }}
-                  className="py-1.5 px-3 bg-amber-50 hover:bg-amber-100 text-xs font-bold text-amber-800 rounded-xl border border-amber-200 flex items-center gap-1"
-                >
-                  <Lock className="w-3 h-3" />
-                  <span>Lock</span>
-                </button>
-
-                <button
-                  onClick={() => {
-                    setShowUserMenu(false)
                     signOutUser()
                   }}
-                  className="py-1.5 px-3 bg-rose-50 hover:bg-rose-100 text-xs font-bold text-rose-700 rounded-xl border border-rose-200 flex items-center gap-1"
+                  className="flex-1 text-center py-1.5 px-3 bg-rose-50 hover:bg-rose-100 text-xs font-bold text-rose-700 rounded-xl border border-rose-200 flex items-center justify-center gap-1 cursor-pointer"
                 >
-                  <LogOut className="w-3 h-3" />
+                  <LogOut className="w-3.5 h-3.5" />
                   <span>Sign Out</span>
                 </button>
               </div>
@@ -476,38 +454,18 @@ export function MainLayout() {
           <span>Stock</span>
         </NavLink>
 
-        {/* 3. Unpaid Sales */}
-        <NavLink
-          to="/unpaid-sales"
-          className={({ isActive }) =>
-            `relative flex flex-col items-center justify-center w-16 py-1 rounded-xl text-[10px] font-bold transition-all touch-manipulation active:scale-95 ${
-              isActive ? 'text-emerald-700 bg-emerald-50' : 'text-slate-500 hover:text-slate-900'
-            }`
-          }
-        >
-          <div className="relative">
-            <ClockAlert className="w-5 h-5 mb-0.5" />
-            {unpaidCount > 0 && (
-              <span className="absolute -top-1 -right-2 px-1.5 py-0.2 text-[9px] font-bold bg-amber-500 text-white rounded-full">
-                {unpaidCount}
-              </span>
-            )}
-          </div>
-          <span>Unpaid</span>
-        </NavLink>
-
-        {/* 4. Owner Reports */}
+        {/* 3. Staff Control */}
         {isOwner && (
           <NavLink
-            to="/"
+            to="/staff"
             className={({ isActive }) =>
               `flex flex-col items-center justify-center w-16 py-1 rounded-xl text-[10px] font-bold transition-all touch-manipulation active:scale-95 ${
                 isActive ? 'text-emerald-700 bg-emerald-50' : 'text-slate-500 hover:text-slate-900'
               }`
             }
           >
-            <LayoutDashboard className="w-5 h-5 mb-0.5" />
-            <span>Reports</span>
+            <Users className="w-5 h-5 mb-0.5" />
+            <span>Staff</span>
           </NavLink>
         )}
 
@@ -645,25 +603,14 @@ export function MainLayout() {
                 </div>
               </div>
 
-              {/* Quick Lock & Sign Out */}
-              <div className="grid grid-cols-2 gap-2 mt-2">
-                <button
-                  onClick={() => {
-                    setShowMobileMoreSheet(false)
-                    lockSession()
-                  }}
-                  className="flex items-center justify-center gap-1.5 p-3 rounded-xl bg-amber-50 text-amber-800 hover:bg-amber-100 transition-colors touch-manipulation font-bold text-xs"
-                >
-                  <Lock className="w-4 h-4" />
-                  <span>Lock POS</span>
-                </button>
-
+              {/* Sign Out */}
+              <div className="mt-2">
                 <button
                   onClick={() => {
                     setShowMobileMoreSheet(false)
                     signOutUser()
                   }}
-                  className="flex items-center justify-center gap-1.5 p-3 rounded-xl bg-rose-50 text-rose-700 hover:bg-rose-100 transition-colors touch-manipulation font-bold text-xs"
+                  className="w-full flex items-center justify-center gap-1.5 p-3 rounded-xl bg-rose-50 text-rose-700 hover:bg-rose-100 transition-colors touch-manipulation font-bold text-xs cursor-pointer"
                 >
                   <LogOut className="w-4 h-4" />
                   <span>Sign Out</span>

@@ -1,131 +1,106 @@
-import React, { createContext, useContext, useState, useEffect } from 'react'
-import {
-  onAuthStateChanged,
-  signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
-  signInWithPopup,
-  sendPasswordResetEmail,
-  signOut,
-  updateProfile
-} from 'firebase/auth'
-import { auth, googleProvider, appleProvider, isFirebaseConfigured } from '../lib/firebase'
+import React, { createContext, useContext } from 'react'
+import { useUser, useClerk } from '@clerk/clerk-react'
+import { useQuery } from 'convex/react'
+import { api } from '../../convex/_generated/api'
 
-const AuthContext = createContext(null)
+export const AuthContext = createContext(null)
 
-const getAvatar = (name = '', email = '') => {
+export const getAvatar = (name = '', email = '') => {
   if (name && name.trim()) {
     return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
   }
   if (email && email.trim()) {
     return email.slice(0, 2).toUpperCase()
   }
-  return 'LG'
+  return 'OM'
 }
 
 export function AuthProvider({ children }) {
-  const [firebaseUser, setFirebaseUser] = useState(null)
-  const [authLoading, setAuthLoading] = useState(true)
+  const { isLoaded: clerkLoaded, isSignedIn, user: clerkUser } = useUser()
+  const { signOut } = useClerk()
 
-  // Listen to Firebase Auth state change
-  useEffect(() => {
-    if (!auth || !isFirebaseConfigured) {
-      setAuthLoading(false)
-      return
-    }
+  // Query linked Convex user profile by Clerk user ID
+  const convexUser = useQuery(
+    api.users.getUser,
+    clerkUser?.id ? { userId: clerkUser.id } : 'skip'
+  )
 
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setFirebaseUser(user)
-      setAuthLoading(false)
-    })
+  // Loading indicator: waiting for Clerk or Convex query to resolve
+  const authLoading = !clerkLoaded || (isSignedIn && convexUser === undefined)
 
-    return () => unsubscribe()
-  }, [])
+  const isOwner = convexUser?.role === 'owner'
+  const isSalesperson = convexUser?.role === 'salesperson'
+  const isPending = isSalesperson && convexUser?.status === 'pending'
+  const isApproved = convexUser?.status === 'approved' || isOwner
 
-  // Sign in with Email and Password
-  const signInWithEmail = async (email, password) => {
-    if (!auth) throw new Error('Firebase Auth not configured')
-    return await signInWithEmailAndPassword(auth, email.trim(), password)
+  const currentUser = convexUser
+    ? {
+        ...convexUser,
+        id: convexUser._id,
+        name: convexUser.name,
+        role: convexUser.role,
+        email: convexUser.email,
+        passcode: '1234', // default POS passcode for fast testing
+      }
+    : clerkUser
+    ? {
+        id: clerkUser.id,
+        name: clerkUser.fullName || clerkUser.firstName || 'User',
+        email: clerkUser.primaryEmailAddress?.emailAddress || '',
+        role: 'salesperson',
+      }
+    : null
+
+  // Backwards compatibility for any legacy references to firebaseUser
+  const firebaseUser = clerkUser
+    ? {
+        uid: clerkUser.id,
+        id: clerkUser.id,
+        displayName: clerkUser.fullName || clerkUser.firstName || 'User',
+        email: clerkUser.primaryEmailAddress?.emailAddress || '',
+      }
+    : null
+
+  const permissions = {
+    isOwner,
+    canManageStock: isOwner,
+    canManageStaff: isOwner,
+    canProcessSale: true,
   }
 
-  // Sign up with Email and Password
-  const signUpWithEmail = async (email, password, displayName) => {
-    if (!auth) throw new Error('Firebase Auth not configured')
-    const cred = await createUserWithEmailAndPassword(auth, email.trim(), password)
-    if (displayName && cred.user) {
-      await updateProfile(cred.user, { displayName: displayName.trim() })
-      setFirebaseUser({ ...cred.user, displayName: displayName.trim() })
-    }
-    return cred
-  }
-
-  // Sign in / Sign up with Google OAuth
-  const signInWithGoogle = async () => {
-    if (!auth || !googleProvider) throw new Error('Google provider not configured')
-    return await signInWithPopup(auth, googleProvider)
-  }
-
-  // Sign in / Sign up with Apple OAuth
-  const signInWithApple = async () => {
-    if (!auth || !appleProvider) throw new Error('Apple provider not configured')
-    return await signInWithPopup(auth, appleProvider)
-  }
-
-  // Send password reset email
-  const sendResetPassword = async (email) => {
-    if (!auth) throw new Error('Firebase Auth not configured')
-    return await sendPasswordResetEmail(auth, email.trim())
-  }
-
-  // Update user profile display name
-  const updateUserProfile = async (displayName) => {
-    if (!auth?.currentUser) throw new Error('No user logged in')
-    await updateProfile(auth.currentUser, { displayName: displayName.trim() })
-    setFirebaseUser({ ...auth.currentUser, displayName: displayName.trim() })
-  }
-
-  // Sign out user
   const signOutUser = async () => {
-    if (!auth) return
-    await signOut(auth)
+    try {
+      await signOut()
+    } catch (e) {
+      console.warn('Sign out error:', e)
+    }
   }
 
   return (
-    <AuthContext.Provider value={{
-      firebaseUser,
-      authLoading,
-      signInWithEmail,
-      signUpWithEmail,
-      signInWithGoogle,
-      signInWithApple,
-      sendResetPassword,
-      updateUserProfile,
-      signOutUser,
-      getAvatar,
-    }}>
+    <AuthContext.Provider
+      value={{
+        clerkUser,
+        convexUser,
+        firebaseUser, // compatibility alias
+        currentUser,
+        authLoading,
+        isSignedIn,
+        isOwner,
+        isSalesperson,
+        isPending,
+        isApproved,
+        permissions,
+        signOutUser,
+        getAvatar,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   )
 }
 
-import { TenantContext } from './TenantContext'
-
 export function useAuth() {
   const authCtx = useContext(AuthContext)
-  const tenantCtx = useContext(TenantContext)
   if (!authCtx) throw new Error('useAuth must be used within an AuthProvider')
-  return {
-    ...authCtx,
-    ...(tenantCtx ? {
-      currentUser: tenantCtx.currentUser,
-      isOwner: tenantCtx.isOwner,
-      isSalesperson: tenantCtx.isSalesperson,
-      permissions: tenantCtx.permissions,
-      users: tenantCtx.users,
-      switchUser: tenantCtx.switchUser,
-      lockSession: tenantCtx.lockSession,
-      isPasscodeLocked: tenantCtx.isPasscodeLocked,
-      pendingUser: tenantCtx.pendingUser,
-      verifyPasscode: tenantCtx.verifyPasscode,
-    } : {})
-  }
+  return authCtx
 }

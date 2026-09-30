@@ -9,7 +9,6 @@ import {
   RefreshCw,
   LogOut,
   Sparkles,
-  CheckCircle2
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { useTenant } from '../context/TenantContext'
@@ -17,40 +16,40 @@ import { Button } from '../components/ui/Button'
 import { Badge } from '../components/ui/Badge'
 
 export function AwaitingApprovalPage({ orgInfo }) {
-  const { firebaseUser, signOutUser, getAvatar } = useAuth()
-  const { refreshApprovalStatus, activeOrg } = useTenant()
+  const { currentUser, convexUser, clerkUser, signOutUser } = useAuth()
+  const { companyCode: tenantCompanyCode } = useTenant()
   const [checking, setChecking] = useState(false)
   const [checkMessage, setCheckMessage] = useState('')
 
-  const handleManualCheck = async () => {
+  const handleManualCheck = () => {
     setChecking(true)
     setCheckMessage('')
-    try {
-      if (refreshApprovalStatus) {
-        await refreshApprovalStatus()
-      }
-      setCheckMessage('Status checked. Still awaiting approval from owner.')
-      setTimeout(() => setCheckMessage(''), 4000)
-    } catch (err) {
-      console.error('Error refreshing approval status:', err)
-      setCheckMessage('Unable to refresh status. Please try again.')
-    } finally {
+    setTimeout(() => {
       setChecking(false)
-    }
+      if (convexUser?.status === 'approved') {
+        setCheckMessage('Approved! Redirecting to workspace...')
+      } else {
+        setCheckMessage('Status checked. Still awaiting approval from owner.')
+      }
+      setTimeout(() => setCheckMessage(''), 4000)
+    }, 600)
   }
 
-  const organizationName = orgInfo?.name || activeOrg?.name || activeOrg?.businessName || 'Your Organization'
-  const companyCode = orgInfo?.companyCode || activeOrg?.companyCode || '------'
-  const displayName = firebaseUser?.displayName || 'Salesperson'
-  const userEmail = firebaseUser?.email || ''
+  const organizationName =
+    orgInfo?.name || convexUser?.client?.name || 'Your Organization'
+  const companyCode =
+    orgInfo?.companyCode || convexUser?.client?.companyCode || tenantCompanyCode || '------'
+  const displayName =
+    convexUser?.name || clerkUser?.fullName || clerkUser?.firstName || 'Salesperson'
+  const userEmail =
+    convexUser?.email || clerkUser?.primaryEmailAddress?.emailAddress || ''
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 flex flex-col justify-center items-center px-4 py-8 selection:bg-emerald-500 selection:text-white">
-      
       {/* Brand Header */}
       <div className="text-center mb-6 max-w-md w-full">
-        <div className="w-14 h-14 rounded-2xl bg-white text-slate-900 flex items-center justify-center font-black text-2xl mx-auto shadow-xl shadow-emerald-950/40 mb-3 border border-slate-100">
-          L
+        <div className="w-14 h-14 rounded-2xl bg-white text-slate-900 flex items-center justify-center font-black text-2xl mx-auto shadow-xl mb-3 border border-slate-100">
+          O
         </div>
         <h1 className="text-2xl font-black tracking-tight text-white">OMESTOCK</h1>
         <p className="text-xs text-slate-400 font-medium mt-1">
@@ -60,7 +59,6 @@ export function AwaitingApprovalPage({ orgInfo }) {
 
       {/* Main Card */}
       <div className="bg-white rounded-3xl shadow-2xl border border-slate-100 w-full max-w-lg p-6 sm:p-8 animate-in fade-in zoom-in-95 duration-200">
-        
         {/* Status Icon & Beacon */}
         <div className="flex flex-col items-center text-center space-y-3">
           <div className="relative">
@@ -81,7 +79,8 @@ export function AwaitingApprovalPage({ orgInfo }) {
               Account Awaiting Verification
             </h2>
             <p className="text-xs sm:text-sm text-slate-500 max-w-sm mx-auto leading-relaxed">
-              Your salesperson registration was successful! Access to the POS terminal, sales registers, and inventory is <span className="font-semibold text-slate-700">strictly locked</span> until your business owner grants approval.
+              Your salesperson registration was successful! Access to the POS terminal, sales registers, and inventory is{' '}
+              <span className="font-semibold text-slate-700">strictly locked</span> until your business owner grants approval.
             </p>
           </div>
         </div>
@@ -90,9 +89,9 @@ export function AwaitingApprovalPage({ orgInfo }) {
         <div className="mt-5 p-4 rounded-2xl bg-amber-50/70 border border-amber-200/80 flex items-start gap-3 text-left">
           <ShieldAlert className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
           <div className="text-xs text-amber-900 space-y-1">
-            <p className="font-bold">Dashboard Access Strictly Restricted</p>
+            <p className="font-bold">Register Access Restricted</p>
             <p className="text-amber-800/90 leading-normal">
-              For security, new salesperson profiles must be authorized by an Owner or Administrator in the Staff Management control panel before operating any registers or viewing inventory data.
+              For enterprise security, new salesperson profiles must be authorized by an Owner or Administrator in the Staff Management control panel before operating POS registers or viewing inventory data.
             </p>
           </div>
         </div>
@@ -148,7 +147,7 @@ export function AwaitingApprovalPage({ orgInfo }) {
         {/* Live Auto-Refresh Notice */}
         <div className="mt-4 flex items-center justify-center gap-1.5 text-[11px] text-slate-400 text-center font-medium">
           <Sparkles className="w-3.5 h-3.5 text-emerald-500" />
-          <span>This screen updates automatically in real-time once approved.</span>
+          <span>Real-time sync: This screen activates immediately once approved.</span>
         </div>
 
         {/* Action Buttons */}
@@ -174,9 +173,8 @@ export function AwaitingApprovalPage({ orgInfo }) {
             <span>Sign Out</span>
           </button>
         </div>
-
       </div>
-
     </div>
   )
 }
+export default AwaitingApprovalPage
