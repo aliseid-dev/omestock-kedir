@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-route
 import { AuthenticateWithRedirectCallback } from '@clerk/clerk-react'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { TenantProvider, useTenant } from './context/TenantContext'
+import { ToastProvider } from './context/ToastContext'
 import { AuthPage } from './pages/AuthPage'
 import { RoleOnboardingPage } from './pages/RoleOnboardingPage'
 import { AwaitingApprovalPage } from './pages/AwaitingApprovalPage'
@@ -13,6 +14,7 @@ import { InventoryPage } from './pages/InventoryPage'
 import { StaffPage } from './pages/StaffPage'
 import { UnpaidSalesPage } from './pages/UnpaidSalesPage'
 import { AuditTrailPage } from './pages/AuditTrailPage'
+import { ProfilePage } from './pages/ProfilePage'
 import { Loader2 } from 'lucide-react'
 
 function AppContent() {
@@ -64,9 +66,9 @@ function AppContent() {
         <Route path="unpaid-sales" element={<UnpaidSalesPage />} />
         <Route path="audit-trail" element={<AuditTrailPage />} />
 
-        {/* Simplified Coming Soon screens for secondary modules */}
+        {/* Secondary modules */}
         <Route path="dashboard" element={<ComingSoonPage title="Executive Analytics Dashboard" />} />
-        <Route path="profile" element={<ComingSoonPage title="User & Enterprise Profile" />} />
+        <Route path="profile" element={<ProfilePage />} />
         <Route path="org-hub" element={<ComingSoonPage title="Multi-Branch Organization Hub" />} />
 
         {/* Catch-all redirect to POS */}
@@ -81,7 +83,9 @@ export function App() {
     <BrowserRouter>
       <AuthProvider>
         <TenantProvider>
-          <AppContent />
+          <ToastProvider>
+            <AppContent />
+          </ToastProvider>
         </TenantProvider>
       </AuthProvider>
     </BrowserRouter>

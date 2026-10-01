@@ -47,43 +47,16 @@ export function AwaitingApprovalPage({ orgInfo }) {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 flex flex-col justify-center items-center px-4 py-8 selection:bg-emerald-500 selection:text-white">
       {/* Brand Header */}
-      <div className="text-center mb-6 max-w-md w-full">
-        <div className="w-14 h-14 rounded-2xl bg-white text-slate-900 flex items-center justify-center font-black text-2xl mx-auto shadow-xl mb-3 border border-slate-100">
+      <div className="flex items-center justify-center gap-3 mb-6 sm:mb-8">
+        <div className="w-10 h-10 rounded-xl bg-black text-white flex items-center justify-center font-black text-xl shadow-lg border border-slate-800">
           O
         </div>
-        <h1 className="text-2xl font-black tracking-tight text-white">OMESTOCK</h1>
-        <p className="text-xs text-slate-400 font-medium mt-1">
-          Retail POS & Multi-Store Inventory Management
-        </p>
+        <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white">OMESTOCK</h1>
       </div>
 
       {/* Main Card */}
       <div className="bg-white rounded-3xl shadow-2xl border border-slate-100 w-full max-w-lg p-6 sm:p-8 animate-in fade-in zoom-in-95 duration-200">
-        {/* Status Icon & Beacon */}
-        <div className="flex flex-col items-center text-center space-y-3">
-          <div className="relative">
-            <div className="w-16 h-16 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center border border-amber-200 shadow-sm">
-              <Clock className="w-8 h-8 animate-pulse text-amber-600" />
-            </div>
-            <span className="absolute -top-1 -right-1 flex h-4 w-4">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-4 w-4 bg-amber-500 border-2 border-white"></span>
-            </span>
-          </div>
 
-          <div className="space-y-1">
-            <Badge variant="warning" className="px-3 py-1 font-bold text-xs uppercase tracking-wider">
-              Pending Owner Approval
-            </Badge>
-            <h2 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight pt-1">
-              Account Awaiting Verification
-            </h2>
-            <p className="text-xs sm:text-sm text-slate-500 max-w-sm mx-auto leading-relaxed">
-              Your salesperson registration was successful! Access to the POS terminal, sales registers, and inventory is{' '}
-              <span className="font-semibold text-slate-700">strictly locked</span> until your business owner grants approval.
-            </p>
-          </div>
-        </div>
 
         {/* Lockout Notice Banner */}
         <div className="mt-5 p-4 rounded-2xl bg-amber-50/70 border border-amber-200/80 flex items-start gap-3 text-left">
@@ -147,7 +120,7 @@ export function AwaitingApprovalPage({ orgInfo }) {
         {/* Live Auto-Refresh Notice */}
         <div className="mt-4 flex items-center justify-center gap-1.5 text-[11px] text-slate-400 text-center font-medium">
           <Sparkles className="w-3.5 h-3.5 text-emerald-500" />
-          <span>Real-time sync: This screen activates immediately once approved.</span>
+          <span>Activates immediately once approved.</span>
         </div>
 
         {/* Action Buttons */}

@@ -11,6 +11,7 @@ import {
 } from 'lucide-react'
 import { useTenant } from '../context/TenantContext'
 import { useAuth } from '../context/AuthContext'
+import { useToast } from '../context/ToastContext'
 import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'
 import { Badge } from '../components/ui/Badge'
@@ -21,6 +22,7 @@ import { ETHIOPIAN_PAYMENT_PROVIDERS, DEFAULT_BANK } from '../lib/ethiopian-bank
 export function UnpaidSalesPage() {
   const { sales, settleCreditSale } = useTenant()
   const { currentUser } = useAuth()
+  const { toast } = useToast()
   
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedSaleToSettle, setSelectedSaleToSettle] = useState(null)
@@ -45,7 +47,7 @@ export function UnpaidSalesPage() {
   const totalOutstanding = unpaidSales.reduce((sum, s) => sum + s.totalAmount, 0)
 
   // Handle Settle Submit
-  const handleSettleSubmit = (e) => {
+  const handleSettleSubmit = async (e) => {
     e.preventDefault()
     if (!selectedSaleToSettle) return
     let bankName = null
@@ -53,8 +55,13 @@ export function UnpaidSalesPage() {
       const bObj = ETHIOPIAN_PAYMENT_PROVIDERS.find(b => b.id === settleBank)
       bankName = bObj ? bObj.name : settleBank
     }
-    settleCreditSale(selectedSaleToSettle.id, settleMethod, bankName, currentUser)
+    const saleInfo = { ...selectedSaleToSettle }
+    await settleCreditSale(selectedSaleToSettle.id, settleMethod, bankName, currentUser)
     setSelectedSaleToSettle(null)
+    toast.success(
+      'Credit Debt Settled',
+      `Payment of ${formatCurrency(saleInfo.totalAmount)} recorded for Invoice #${saleInfo.invoiceNumber} (${saleInfo.customerName || 'Customer'}).`
+    )
   }
 
   // Export to Excel
@@ -69,6 +76,7 @@ export function UnpaidSalesPage() {
       OutstandingAmount: s.totalAmount,
     }))
     exportToExcel(data, 'OMESTOCK_Unpaid_Credit_Sales')
+    toast.success('Report Exported', 'Unpaid credit sales exported to Excel.')
   }
 
   return (
@@ -79,23 +87,8 @@ export function UnpaidSalesPage() {
         <div>
           <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900 flex items-center gap-2">
             <ClockAlert className="w-5 h-5 sm:w-6 sm:h-6 text-amber-600" />
-            Unpaid Sales Follow-Up
+            Unpaid Sales
           </h1>
-          <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
-            Credit debt accounts awaiting payment collection
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleExport}
-            className="flex items-center justify-center gap-1.5 min-h-[40px] text-xs font-semibold w-full sm:w-auto"
-          >
-            <Download className="w-4 h-4" />
-            <span>Export Debtors</span>
-          </Button>
         </div>
       </div>
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import {
   ShoppingCart,
   Plus,
@@ -17,10 +17,13 @@ import {
   Lock,
   Eye,
   Store,
-  Warehouse
+  Warehouse,
+  Table as TableIcon,
+  LayoutGrid
 } from 'lucide-react'
 import { useTenant } from '../context/TenantContext'
 import { useAuth } from '../context/AuthContext'
+import { useToast } from '../context/ToastContext'
 import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'
 import { Badge } from '../components/ui/Badge'
@@ -29,23 +32,97 @@ import { formatCurrency } from '../lib/utils'
 import { ETHIOPIAN_PAYMENT_PROVIDERS, DEFAULT_BANK } from '../lib/ethiopian-banks'
 
 export function PosPage() {
-  const { stores, warehouses, products, recordSale } = useTenant()
+  const { stores, warehouses, products, staff, recordSale } = useTenant()
   const { currentUser, isOwner } = useAuth()
+  const { toast } = useToast()
 
-  // Selected Store: strictly locked if salesperson
-  const assignedStoreId = currentUser.storeId || stores[0]?.id || ''
-  const [selectedStoreId, setSelectedStoreId] = useState(assignedStoreId)
-  
-  // When active user changes, enforce assigned store if salesperson
+  // Permission check for credit / unpaid sales
+  const currentStaffMember = staff?.find(s => s.userId === currentUser?.id || s.email === currentUser?.email || s.id === currentUser?.id)
+  const canMakeCreditSales = isOwner || (currentStaffMember?.allowCreditSales !== false)
+
+  // Location selection: Supports both Retail Stores & Central Warehouses (for direct warehouse sales)
+  // Format of key: "store:<id>" or "warehouse:<id>"
+  const defaultLocationKey = currentUser?.storeId 
+    ? `store:${currentUser.storeId}` 
+    : (stores?.[0]?.id ? `store:${stores[0].id}` : (warehouses?.[0]?.id ? `warehouse:${warehouses[0].id}` : ''))
+  const [selectedLocationKey, setSelectedLocationKey] = useState(defaultLocationKey)
+
+  // Enforce salesperson assigned store if not owner, and auto-sync on load
   useEffect(() => {
-    if (!isOwner && currentUser.storeId) {
-      setSelectedStoreId(currentUser.storeId)
+    if (!isOwner && currentUser?.storeId) {
+      setSelectedLocationKey(`store:${currentUser.storeId}`)
+    } else if (!selectedLocationKey && (stores?.[0]?.id || warehouses?.[0]?.id)) {
+      setSelectedLocationKey(stores?.[0]?.id ? `store:${stores[0].id}` : `warehouse:${warehouses[0].id}`)
     }
-  }, [currentUser.id, isOwner])
+  }, [currentUser?.id, currentUser?.storeId, isOwner, stores, warehouses, selectedLocationKey])
+
+  // Active Location resolution (Store or Warehouse)
+  const isSelectedWarehouse = Boolean(selectedLocationKey?.startsWith('warehouse:'))
+  const rawLocationId = selectedLocationKey ? selectedLocationKey.replace(/^(store|warehouse):/, '') : ''
+
+  const activeLocation = useMemo(() => {
+    if (isSelectedWarehouse) {
+      const wh = warehouses?.find(w => w.id === rawLocationId) || warehouses?.[0]
+      if (wh) {
+        return {
+          ...wh,
+          isWarehouse: true,
+          stock: wh.stock || {},
+          label: wh.name.toLowerCase().includes('warehouse') ? wh.name : `${wh.name} (Warehouse)`
+        }
+      }
+    }
+    const st = stores?.find(s => s.id === rawLocationId) || stores?.[0]
+    if (st) {
+      return {
+        ...st,
+        isWarehouse: false,
+        stock: st.stock || {},
+        label: st.name
+      }
+    }
+    // Fallback to warehouse if no stores exist
+    if (warehouses?.[0]) {
+      return {
+        ...warehouses[0],
+        isWarehouse: true,
+        stock: warehouses[0].stock || {},
+        label: warehouses[0].name.toLowerCase().includes('warehouse') ? warehouses[0].name : `${warehouses[0].name} (Warehouse)`
+      }
+    }
+    // Safe default to prevent null reference errors
+    return {
+      id: 'default',
+      name: 'Main Location',
+      isWarehouse: false,
+      stock: {},
+      label: 'Main Location'
+    }
+  }, [selectedLocationKey, isSelectedWarehouse, rawLocationId, warehouses, stores])
+
+  // Backward-compatibility alias for all cart & stock logic
+  const activeStore = activeLocation
 
   const [searchQuery, setSearchQuery] = useState('')
+  const [selectedCategory, setSelectedCategory] = useState('All')
 
-  // Cart: [{ product, quantity, commissionAmount }]
+  // Catalog View Mode: 'cards' | 'table' (persisted in localStorage, matches InventoryPage)
+  const [posViewMode, setPosViewMode] = useState(() => {
+    try {
+      return localStorage.getItem('omestock_pos_view_mode') || 'cards'
+    } catch {
+      return 'cards'
+    }
+  })
+
+  const handleSetPosViewMode = (mode) => {
+    setPosViewMode(mode)
+    try {
+      localStorage.setItem('omestock_pos_view_mode', mode)
+    } catch {}
+  }
+
+  // Cart: [{ product, quantity, customPrice, commissionAmount }]
   const [cart, setCart] = useState([])
   const [paymentMethod, setPaymentMethod] = useState('Cash') // 'Cash' | 'Banking' | 'Credit'
   const [selectedBank, setSelectedBank] = useState(DEFAULT_BANK)
@@ -62,41 +139,83 @@ export function PosPage() {
   // Multi-Store Inventory Lookup Modal State
   const [isMultiStoreModalOpen, setIsMultiStoreModalOpen] = useState(false)
   const [inspectProduct, setInspectProduct] = useState(null)
+  const [inspectSearchQuery, setInspectSearchQuery] = useState('')
 
-  const activeStore = stores.find(s => s.id === selectedStoreId) || stores[0]
+  // Filtered products for inspection modal
+  const inspectFilteredProducts = useMemo(() => {
+    const query = inspectSearchQuery.trim().toLowerCase()
+    if (!query) return products
+    return products.filter(p =>
+      p.name.toLowerCase().includes(query) ||
+      (p.code && p.code.toLowerCase().includes(query)) ||
+      (p.category && p.category.toLowerCase().includes(query))
+    )
+  }, [products, inspectSearchQuery])
 
-  // Filtered Products
-  const filteredProducts = products.filter(p =>
-    p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (p.category && p.category.toLowerCase().includes(searchQuery.toLowerCase()))
-  )
+  // Available categories for filtering
+  const availableCategories = useMemo(() => {
+    const cats = new Set(products.map(p => p.category).filter(Boolean))
+    return ['All', ...Array.from(cats)]
+  }, [products])
+
+  // Filtered Products by Search Query and Category
+  const filteredProducts = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase()
+    return products.filter(p => {
+      const matchesSearch = !query ||
+        p.name.toLowerCase().includes(query) ||
+        (p.code && p.code.toLowerCase().includes(query)) ||
+        (p.category && p.category.toLowerCase().includes(query))
+      const matchesCategory = selectedCategory === 'All' || p.category === selectedCategory
+      return matchesSearch && matchesCategory
+    })
+  }, [products, searchQuery, selectedCategory])
 
   // Add product to cart
   const handleAddToCart = (product) => {
     const existing = cart.find(item => item.product.id === product.id)
-    const currentStoreStock = activeStore?.stock[product.id] || 0
+    const currentStoreStock = activeStore?.stock?.[product.id] || 0
 
     if (existing) {
       if (existing.quantity >= currentStoreStock) {
-        alert(`Cannot add more than available store stock (${currentStoreStock} units)`)
+        toast.warning('Stock Limit', `Cannot add more than available store stock (${currentStoreStock} units).`)
         return
       }
       setCart(cart.map(item => {
         if (item.product.id === product.id) {
           const newQty = item.quantity + 1
-          const commissionAmount = (product.sellingPrice * newQty * (product.defaultCommissionRate || 5)) / 100
+          const unitPrice = item.customPrice !== undefined && !isNaN(item.customPrice) ? item.customPrice : (product.sellingPrice || 0)
+          const commissionAmount = (unitPrice * newQty * (product.defaultCommissionRate || 5)) / 100
           return { ...item, quantity: newQty, commissionAmount }
         }
         return item
       }))
     } else {
       if (currentStoreStock <= 0) {
-        alert('Item is currently out of stock at this store!')
+        toast.warning('Out of Stock', `"${product.name}" is currently out of stock at this location!`)
         return
       }
-      const commissionAmount = (product.sellingPrice * 1 * (product.defaultCommissionRate || 5)) / 100
-      setCart([...cart, { product, quantity: 1, commissionAmount }])
+      const unitPrice = product.sellingPrice || 0
+      const commissionAmount = (unitPrice * 1 * (product.defaultCommissionRate || 5)) / 100
+      setCart([...cart, { product, quantity: 1, customPrice: unitPrice, commissionAmount }])
     }
+  }
+
+  // Update custom selling price for an item in cart (supports price negotiation / price ranges)
+  const handleSetCustomPrice = (productId, newPriceStr) => {
+    const item = cart.find(i => i.product.id === productId)
+    if (!item) return
+
+    const parsedPrice = parseFloat(newPriceStr)
+    const validPrice = isNaN(parsedPrice) || parsedPrice < 0 ? 0 : parsedPrice
+
+    setCart(cart.map(i => {
+      if (i.product.id === productId) {
+        const commissionAmount = (validPrice * i.quantity * (i.product.defaultCommissionRate || 5)) / 100
+        return { ...i, customPrice: validPrice, commissionAmount }
+      }
+      return i
+    }))
   }
 
   // Update item quantity (via stepper or manual numeric typing)
@@ -104,7 +223,7 @@ export function PosPage() {
     const item = cart.find(i => i.product.id === productId)
     if (!item) return
 
-    const currentStoreStock = activeStore?.stock[productId] || 0
+    const currentStoreStock = activeStore?.stock?.[productId] || 0
     let parsedQty = parseInt(newQuantityStr, 10)
 
     if (isNaN(parsedQty) || parsedQty <= 0) {
@@ -112,13 +231,14 @@ export function PosPage() {
     }
 
     if (parsedQty > currentStoreStock) {
-      alert(`Max available stock at ${activeStore.name} is ${currentStoreStock}`)
+      toast.warning('Max Stock', `Max available stock at ${activeStore?.name || 'this location'} is ${currentStoreStock}.`)
       parsedQty = currentStoreStock
     }
 
     setCart(cart.map(i => {
       if (i.product.id === productId) {
-        const commissionAmount = (i.product.sellingPrice * parsedQty * (i.product.defaultCommissionRate || 5)) / 100
+        const unitPrice = i.customPrice !== undefined && !isNaN(i.customPrice) ? i.customPrice : (i.product.sellingPrice || 0)
+        const commissionAmount = (unitPrice * parsedQty * (i.product.defaultCommissionRate || 5)) / 100
         return { ...i, quantity: parsedQty, commissionAmount }
       }
       return i
@@ -145,12 +265,16 @@ export function PosPage() {
   const handleInspectStock = (e, product) => {
     e.stopPropagation()
     setInspectProduct(product)
+    setInspectSearchQuery('')
     setIsMultiStoreModalOpen(true)
   }
 
   // Cart Totals
   const totalItemsCount = cart.reduce((sum, item) => sum + item.quantity, 0)
-  const totalAmount = cart.reduce((sum, item) => sum + (item.product.sellingPrice * item.quantity), 0)
+  const totalAmount = cart.reduce((sum, item) => {
+    const unitPrice = item.customPrice !== undefined && !isNaN(item.customPrice) ? item.customPrice : (item.product.sellingPrice || 0)
+    return sum + (unitPrice * item.quantity)
+  }, 0)
   const totalCommission = cart.reduce((sum, item) => sum + (item.commissionAmount || 0), 0)
 
   const [isCheckingOut, setIsCheckingOut] = useState(false)
@@ -161,7 +285,7 @@ export function PosPage() {
     if (cart.length === 0 || isCheckingOut) return
 
     if (paymentMethod === 'Credit' && !customerName.trim()) {
-      alert('Please enter a Customer or Company Name for Credit sales.')
+      toast.warning('Customer Required', 'Please enter a Customer or Company Name for Credit sales.')
       return
     }
 
@@ -172,44 +296,51 @@ export function PosPage() {
     }
 
     const salePayload = {
-      storeId: activeStore.id,
-      storeName: activeStore.name,
+      storeId: activeStore?.id,
+      storeName: activeStore?.name,
       paymentMethod,
       bankProvider: bankProviderName,
-      bankRef: bankRef.trim() || null,
+      bankRef: bankRef.trim() || undefined,
       customerName: customerName.trim() || 'Walk-in Customer',
-      customerPhone: customerPhone.trim(),
+      customerPhone: customerPhone.trim() || undefined,
       totalAmount,
-      items: cart.map(item => ({
-        productId: item.product.id,
-        productName: item.product.name,
-        quantity: item.quantity,
-        unitPrice: item.product.sellingPrice,
-        costPrice: item.product.costPrice,
-        commissionRate: item.product.defaultCommissionRate || 5,
-        commissionAmount: item.commissionAmount,
-      }))
+      items: cart.map(item => {
+        const unitPrice = item.customPrice !== undefined && !isNaN(item.customPrice) ? item.customPrice : (item.product.sellingPrice || 0)
+        return {
+          productId: item.product.id,
+          productName: item.product.name,
+          quantity: item.quantity,
+          unitPrice,
+          costPrice: item.product.costPrice,
+          commissionRate: item.product.defaultCommissionRate || 5,
+          commissionAmount: item.commissionAmount,
+        }
+      })
     }
 
     setIsCheckingOut(true)
-    // Clear cart optimistically for snappy UX
-    setCart([])
-    setCustomerName('')
-    setCustomerPhone('')
-    setBankRef('')
-    setIsMobileCartOpen(false)
 
     try {
       const createdSale = await recordSale(salePayload, currentUser)
       if (createdSale) {
+        const totalItems = cart.reduce((s, i) => s + i.quantity, 0)
+        toast.success(
+          paymentMethod === 'Credit' ? 'Credit Sale Recorded' : 'Sale Completed',
+          `${formatCurrency(totalAmount)} • ${totalItems} item${totalItems > 1 ? 's' : ''} via ${paymentMethod}`
+        )
+        setCart([])
+        setCustomerName('')
+        setCustomerPhone('')
+        setBankRef('')
+        setIsMobileCartOpen(false)
         setLastCompletedSale(createdSale)
         setTimeout(() => {
           setLastCompletedSale(curr => (curr?.id === createdSale.id ? null : curr))
-        }, 3000)
+        }, 5000)
       }
     } catch (err) {
       console.error('Sale recording failed:', err)
-      alert('Sale could not be saved to the database. Please try again.')
+      toast.error('Sale Failed', 'Sale could not be saved to the database. Please try again.')
     } finally {
       setIsCheckingOut(false)
     }
@@ -218,61 +349,86 @@ export function PosPage() {
   // Reusable Checkout Form
   const renderCheckoutForm = () => (
     <div className="space-y-4">
-      {/* Cart Items List with Direct Manual Numeric Input */}
+      {/* Cart Items List with Direct Manual Numeric Input & Unit Price editing */}
       <div className="space-y-2.5 max-h-[300px] overflow-y-auto pr-1">
         {cart.length === 0 ? (
           <div className="text-center py-8 text-slate-400 text-xs">
             Cart is empty. Tap products to add them.
           </div>
         ) : (
-          cart.map(({ product, quantity, commissionAmount }) => {
-            const currentStoreStock = activeStore?.stock[product.id] || 0
+          cart.map(({ product, quantity, commissionAmount, customPrice }) => {
+            const currentStoreStock = activeStore?.stock?.[product.id] || 0
+            const activePrice = customPrice !== undefined && !isNaN(customPrice) ? customPrice : (product.sellingPrice || 0)
             return (
-              <div key={product.id} className="p-3 rounded-xl bg-slate-50 border border-slate-200/80 flex items-center justify-between text-xs">
-                <div className="flex-1 pr-2">
-                  <p className="font-bold text-slate-900 line-clamp-1">{product.name}</p>
-                  <p className="text-[11px] text-slate-500 mt-0.5">
-                    {formatCurrency(product.sellingPrice)} &bull; Comm: +{formatCurrency(commissionAmount)}
-                  </p>
-                </div>
-                
-                {/* Manual Quantity Input & Stepper */}
-                <div className="flex items-center gap-1.5 shrink-0">
+              <div key={product.id} className="p-3 rounded-xl bg-slate-50 border border-slate-200/80 space-y-2 text-xs">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex-1 pr-1">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {product.code && (
+                        <span className="font-mono text-[10px] bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded font-bold">{product.code}</span>
+                      )}
+                      <p className="font-bold text-slate-900 line-clamp-1">{product.name}</p>
+                    </div>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      Comm ({product.defaultCommissionRate || 5}%): +{formatCurrency(commissionAmount)}
+                    </p>
+                  </div>
                   <button
                     type="button"
-                    onClick={() => handleUpdateQuantityDelta(product.id, -1)}
-                    className="w-8 h-8 rounded-xl bg-white border border-slate-300 flex items-center justify-center hover:bg-slate-100 touch-manipulation active:scale-95"
+                    onClick={() => handleRemoveItem(product.id)}
+                    className="p-1 text-slate-400 hover:text-rose-600 touch-manipulation"
+                    title="Remove item"
                   >
-                    <Minus className="w-3.5 h-3.5 text-slate-700" />
+                    <Trash2 className="w-4 h-4" />
                   </button>
+                </div>
 
-                  {/* Direct Manual Numeric Input */}
-                  <div className="relative">
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-200/60">
+                  {/* Unit Selling Price input (flexible for variable / negotiable items) */}
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[11px] text-slate-500 font-medium">Price:</span>
+                    <input
+                      type="number"
+                      step="any"
+                      value={activePrice}
+                      onChange={(e) => handleSetCustomPrice(product.id, e.target.value)}
+                      className="w-20 h-7 px-2 text-xs font-bold text-slate-900 bg-white border border-slate-300 rounded-md focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                    />
+                    <span className="text-[10px] text-slate-400">ETB</span>
+                    {product.sellingPriceRange && (
+                      <span className="text-[10px] text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded font-semibold border border-amber-200/60">
+                        {product.sellingPriceRange}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Manual Quantity Input & Stepper */}
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => handleUpdateQuantityDelta(product.id, -1)}
+                      className="w-7 h-7 rounded-lg bg-white border border-slate-300 flex items-center justify-center hover:bg-slate-100 touch-manipulation active:scale-95"
+                    >
+                      <Minus className="w-3 h-3 text-slate-700" />
+                    </button>
+
                     <input
                       type="number"
                       min="1"
                       max={currentStoreStock}
                       value={quantity}
                       onChange={(e) => handleSetQuantity(product.id, e.target.value)}
-                      className="w-12 h-8 text-center font-extrabold text-slate-900 bg-white border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      className="w-10 h-7 text-center font-extrabold text-slate-900 bg-white border border-slate-300 rounded-md text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500"
                     />
+
+                    <button
+                      type="button"
+                      onClick={() => handleUpdateQuantityDelta(product.id, 1)}
+                      className="w-7 h-7 rounded-lg bg-white border border-slate-300 flex items-center justify-center hover:bg-slate-100 touch-manipulation active:scale-95"
+                    >
+                      <Plus className="w-3 h-3 text-slate-700" />
+                    </button>
                   </div>
-
-                  <button
-                    type="button"
-                    onClick={() => handleUpdateQuantityDelta(product.id, 1)}
-                    className="w-8 h-8 rounded-xl bg-white border border-slate-300 flex items-center justify-center hover:bg-slate-100 touch-manipulation active:scale-95"
-                  >
-                    <Plus className="w-3.5 h-3.5 text-slate-700" />
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => handleRemoveItem(product.id)}
-                    className="ml-1 p-1 text-slate-400 hover:text-rose-600 touch-manipulation"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
                 </div>
               </div>
             )
@@ -310,20 +466,27 @@ export function PosPage() {
           {[
             { id: 'Cash', icon: DollarSign },
             { id: 'Banking', icon: Building },
-            { id: 'Credit', icon: CreditCard }
+            { id: 'Credit', icon: CreditCard, disabled: !canMakeCreditSales }
           ].map(method => (
             <button
               key={method.id}
               type="button"
-              onClick={() => setPaymentMethod(method.id)}
+              disabled={method.disabled}
+              onClick={() => !method.disabled && setPaymentMethod(method.id)}
               className={`p-3 rounded-xl border text-xs font-bold flex flex-col items-center gap-1.5 transition-all touch-manipulation ${
-                paymentMethod === method.id
+                method.disabled
+                  ? 'border-slate-200 bg-slate-100 text-slate-400 opacity-60 cursor-not-allowed'
+                  : paymentMethod === method.id
                   ? 'border-slate-900 bg-slate-900 text-white shadow-sm'
                   : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
               }`}
+              title={method.disabled ? 'Unpaid / Credit sales access disabled by owner' : ''}
             >
               <method.icon className="w-4 h-4" />
               <span>{method.id}</span>
+              {method.disabled && (
+                <span className="text-[9px] font-medium text-slate-400 -mt-1">Locked</span>
+              )}
             </button>
           ))}
         </div>
@@ -447,42 +610,47 @@ export function PosPage() {
   return (
     <div className="space-y-4 sm:space-y-6 pb-28 sm:pb-8 animate-in fade-in duration-200">
       
-      {/* Mobile Top Header: Store Switcher & Staff Info */}
+      {/* POS Top Header: Inline Title + Location Selector (Store or Warehouse) */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900 flex items-center gap-2">
+        <div className="flex items-center gap-2.5 flex-wrap sm:flex-nowrap">
+          <h1 className="text-xl sm:text-2xl font-black tracking-tight text-slate-900 flex items-center gap-2 shrink-0">
             <ShoppingCart className="w-5 h-5 sm:w-6 sm:h-6 text-emerald-600" />
-            Point-of-Sale (POS)
+            <span>POS</span>
           </h1>
-          <p className="text-xs sm:text-sm text-slate-500">
-            Salesperson: <span className="font-semibold text-slate-700">{currentUser.name}</span>
-          </p>
-        </div>
 
-        {/* Store Location: Locked for Salesperson, Unlocked for Owner */}
-        <div className="flex items-center gap-2 w-full sm:w-auto">
+          {/* Location Selector placed directly to the right of POS text */}
           {!isOwner ? (
-            <div className="flex items-center gap-2 px-3 py-2 bg-slate-100 rounded-xl border border-slate-200 text-xs font-bold text-slate-800 w-full sm:w-auto">
+            <div className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 rounded-xl border border-slate-200 text-xs font-bold text-slate-800">
               <Lock className="w-3.5 h-3.5 text-slate-500 shrink-0" />
-              <span>Assigned Store: <span className="text-emerald-700">{activeStore?.name}</span></span>
+              <span>Assigned Store: <span className="text-emerald-700">{activeLocation?.name}</span></span>
             </div>
           ) : (
-            <div className="flex items-center gap-2 w-full sm:w-auto">
-              <label className="text-xs font-semibold text-slate-500 shrink-0">Selling Store (Owner):</label>
+            <div className="relative min-w-[200px] sm:min-w-[260px]">
               <select
-                value={selectedStoreId}
-                onChange={(e) => setSelectedStoreId(e.target.value)}
-                className="flex-1 sm:flex-none text-xs font-bold bg-white border border-slate-300 rounded-xl px-3 py-2.5 text-slate-800 shadow-2xs focus:ring-2 focus:ring-emerald-500 focus:outline-none min-h-[40px]"
+                value={selectedLocationKey}
+                onChange={(e) => setSelectedLocationKey(e.target.value)}
+                className="w-full text-xs font-bold bg-white border-2 border-emerald-500 rounded-xl px-3 py-2 text-slate-900 shadow-2xs focus:ring-2 focus:ring-emerald-500 focus:outline-none cursor-pointer"
               >
-                {stores.map(store => (
-                  <option key={store.id} value={store.id}>
-                    {store.name}
-                  </option>
-                ))}
+                <optgroup label="Retail Stores">
+                  {stores.map(store => (
+                    <option key={`store:${store.id}`} value={`store:${store.id}`}>
+                      {store.name}
+                    </option>
+                  ))}
+                </optgroup>
+                <optgroup label="Warehouses (Direct Sale)">
+                  {warehouses.map(wh => (
+                    <option key={`warehouse:${wh.id}`} value={`warehouse:${wh.id}`}>
+                      {wh.name.toLowerCase().includes('warehouse') ? wh.name : `${wh.name} (Warehouse)`}
+                    </option>
+                  ))}
+                </optgroup>
               </select>
             </div>
           )}
         </div>
+
+        
       </div>
 
       {/* Sale Success Notification */}
@@ -492,10 +660,10 @@ export function PosPage() {
             <CheckCircle className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5 sm:mt-0" />
             <div>
               <p className="text-xs sm:text-sm font-bold text-emerald-950">
-                Sale {lastCompletedSale.invoiceNumber} recorded!
+                Sale {lastCompletedSale.invoiceNumber || lastCompletedSale.receiptNumber || 'Order'} recorded!
               </p>
               <p className="text-xs text-emerald-700 mt-0.5">
-                {lastCompletedSale.paymentMethod} {lastCompletedSale.bankProvider ? `(${lastCompletedSale.bankProvider})` : ''} &bull; {formatCurrency(lastCompletedSale.totalAmount)} &bull; Comm: +{formatCurrency(lastCompletedSale.commissionTotal)}
+                {lastCompletedSale.paymentMethod} {lastCompletedSale.bankProvider ? `(${lastCompletedSale.bankProvider})` : ''} &bull; {formatCurrency(lastCompletedSale.totalAmount ?? lastCompletedSale.total ?? 0)} &bull; Comm: +{formatCurrency(lastCompletedSale.commissionTotal ?? lastCompletedSale.commission ?? 0)}
               </p>
             </div>
           </div>
@@ -503,43 +671,108 @@ export function PosPage() {
             size="sm"
             variant="outline"
             onClick={() => setLastCompletedSale(null)}
-            className="text-xs bg-white text-emerald-800 border-emerald-300 self-end sm:self-auto"
+            className="text-xs bg-white text-emerald-800 border-emerald-300 self-end sm:self-auto cursor-pointer"
           >
             Dismiss
           </Button>
         </div>
       )}
 
-      {/* Search Bar & Multi-Store Stock Quick Lookup Trigger */}
-      <div className="flex items-center gap-2">
-        <div className="relative flex-1">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
-          <input
-            type="text"
-            placeholder="Search products..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full text-xs sm:text-sm pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 min-h-[44px]"
-          />
+      {/* Search Bar, Multi-Store Stock Quick Lookup & View Switcher */}
+      <div className="space-y-2">
+        <div className="flex items-center gap-2">
+          <div className="relative flex-1">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+            <input
+              type="text"
+              placeholder="Search products by name, code, category..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full text-xs sm:text-sm pl-10 pr-9 py-2.5 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 min-h-[44px]"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="absolute right-3 top-3 text-slate-400 hover:text-slate-600"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+
+          {/* Global Multi-Store Inventory Lookup Button */}
+          <Button
+            variant="outline"
+            size="md"
+            onClick={() => {
+              if (!inspectProduct && products.length > 0) {
+                setInspectProduct(products[0])
+              }
+              setInspectSearchQuery('')
+              setIsMultiStoreModalOpen(true)
+            }}
+            className="shrink-0 flex items-center gap-1.5 text-xs font-bold min-h-[44px]"
+            title="Check stock across all branches"
+          >
+            <Store className="w-4 h-4 text-emerald-600" />
+            <span className="hidden sm:inline">Check Other Stores</span>
+            <span className="sm:hidden">Stock</span>
+          </Button>
+
+          {/* View Switcher Toggle (matching InventoryPage design) */}
+          <div className="inline-flex rounded-xl p-0.5 bg-slate-100 border border-slate-200 shrink-0 min-h-[44px] items-center">
+            <button
+              type="button"
+              onClick={() => handleSetPosViewMode('table')}
+              className={`p-2 sm:px-2.5 sm:py-1.5 rounded-lg flex items-center gap-1 text-xs font-bold transition-all cursor-pointer h-full ${
+                posViewMode === 'table'
+                  ? 'bg-white text-slate-900 shadow-xs'
+                  : 'text-slate-400 hover:text-slate-800'
+              }`}
+              title="Table View"
+            >
+              <TableIcon className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Table</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleSetPosViewMode('cards')}
+              className={`p-2 sm:px-2.5 sm:py-1.5 rounded-lg flex items-center gap-1 text-xs font-bold transition-all cursor-pointer h-full ${
+                posViewMode === 'cards'
+                  ? 'bg-white text-slate-900 shadow-xs'
+                  : 'text-slate-400 hover:text-slate-800'
+              }`}
+              title="Card View"
+            >
+              <LayoutGrid className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Cards</span>
+            </button>
+          </div>
         </div>
 
-        {/* Global Multi-Store Inventory Lookup Button */}
-        <Button
-          variant="outline"
-          size="md"
-          onClick={() => {
-            setInspectProduct(products[0])
-            setIsMultiStoreModalOpen(true)
-          }}
-          className="shrink-0 flex items-center gap-1.5 text-xs font-bold min-h-[44px]"
-        >
-          <Store className="w-4 h-4 text-emerald-600" />
-          <span className="hidden sm:inline">Check Other Stores</span>
-          <span className="sm:hidden">Check Stock</span>
-        </Button>
+        {/* Category Filter Pills (if multiple categories exist) */}
+        {availableCategories.length > 2 && (
+          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-0.5">
+            {availableCategories.map(cat => (
+              <button
+                key={cat}
+                type="button"
+                onClick={() => setSelectedCategory(cat)}
+                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors shrink-0 cursor-pointer ${
+                  selectedCategory === cat
+                    ? 'bg-black text-white'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                {cat}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
-      {/* Product Catalog Grid */}
+      {/* Product Catalog Grid / Table */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         
         {/* Left: Product Catalog */}
@@ -548,74 +781,344 @@ export function PosPage() {
             <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
               {activeStore?.name} &bull; Available Items
             </span>
-            <span className="text-xs text-slate-400">
+            <span className="text-xs text-slate-400 font-medium">
               {filteredProducts.length} items
             </span>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {filteredProducts.map((product) => {
-              const stockAtStore = activeStore?.stock[product.id] || 0
-              const isLow = stockAtStore > 0 && stockAtStore <= (product.minStockThreshold || 5)
-              const isOut = stockAtStore <= 0
-              const inCart = cart.find(i => i.product.id === product.id)
+          {filteredProducts.length === 0 ? (
+            <div className="text-center py-12 bg-white rounded-2xl border border-slate-200 text-slate-400 text-sm">
+              No products found matching your search or category filter.
+            </div>
+          ) : posViewMode === 'table' ? (
+            /* ══════════════════════════════════════════════════════════════════ */
+            /* TABLE DESIGN: Clean, Compact POS Table with Instant +/- Stepper    */
+            /* ══════════════════════════════════════════════════════════════════ */
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50/90 border-b border-slate-200 text-[11px] font-black text-slate-500 uppercase tracking-wider">
+                      <th className="py-2.5 pl-3 pr-1 sm:px-4">Item</th>
+                      <th className="py-2.5 px-3 hidden md:table-cell">Category</th>
+                      <th className="py-2.5 px-1 sm:px-2 text-center whitespace-nowrap">Stock</th>
+                      <th className="py-2.5 px-1.5 sm:px-3 whitespace-nowrap">Price</th>
+                      <th className="py-2.5 pl-1 pr-3 text-right whitespace-nowrap w-[70px] sm:w-[90px]">
+                        <span className="hidden sm:inline">Action</span>
+                        <span className="sm:hidden">Add</span>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 text-xs sm:text-sm">
+                    {filteredProducts.map((product) => {
+                      const stockAtStore = activeStore?.stock?.[product.id] || 0
+                      const isLow = stockAtStore > 0 && stockAtStore <= (product.minStockThreshold || 5)
+                      const isOut = stockAtStore <= 0
+                      const inCart = cart.find(i => i.product.id === product.id)
 
-              return (
-                <div
-                  key={product.id}
-                  onClick={() => !isOut && handleAddToCart(product)}
-                  className={`p-4 rounded-2xl border transition-all text-left flex flex-col justify-between touch-manipulation active:scale-[0.98] ${
-                    isOut
-                      ? 'bg-slate-50 border-slate-200 opacity-60 cursor-not-allowed'
-                      : inCart
-                      ? 'bg-emerald-50/50 border-emerald-500 ring-2 ring-emerald-500/20 shadow-xs cursor-pointer'
-                      : 'bg-white border-slate-200/90 hover:border-emerald-400 hover:shadow-xs cursor-pointer'
-                  }`}
-                >
-                  <div>
-                    <div className="flex items-start justify-between gap-2">
-                      <h4 className="text-sm font-bold text-slate-900 leading-snug">{product.name}</h4>
-                      <span className="text-sm font-extrabold text-emerald-600 shrink-0">
-                        {formatCurrency(product.sellingPrice)}
+                      return (
+                        <tr
+                          key={product.id}
+                          onClick={() => !isOut && !inCart && handleAddToCart(product)}
+                          className={`transition-colors touch-manipulation ${
+                            isOut
+                              ? 'bg-slate-50/80 opacity-60 cursor-not-allowed'
+                              : inCart
+                              ? 'bg-emerald-50/40 hover:bg-emerald-50/60'
+                              : 'hover:bg-slate-50/80 cursor-pointer'
+                          }`}
+                        >
+                          {/* Item Name, Code & Unit */}
+                          <td className="py-2 pl-3 pr-1 sm:px-4 align-middle">
+                            <div className="flex flex-col">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                {product.code && (
+                                  <span className="font-mono text-[10px] font-black text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200 shrink-0">
+                                    {product.code}
+                                  </span>
+                                )}
+                                <span className="font-bold text-slate-900 text-xs sm:text-sm leading-tight">
+                                  {product.name}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-1.5 text-[10px] text-slate-400 mt-0.5 truncate">
+                                <span className="font-medium text-slate-500">{product.unit || 'Pc'}</span>
+                                {product.category && (
+                                  <>
+                                    <span>&bull;</span>
+                                    <span className="truncate max-w-[120px]">{product.category}</span>
+                                  </>
+                                )}
+                                <span className="hidden sm:inline">&bull; Comm: {product.defaultCommissionRate}%</span>
+                              </div>
+                            </div>
+                          </td>
+
+                          {/* Category (Hidden on mobile) */}
+                          <td className="py-2 px-3 hidden md:table-cell align-middle">
+                            <span className="inline-block px-2 py-0.5 rounded-lg bg-slate-100 text-slate-600 text-xs font-semibold">
+                              {product.category || 'General'}
+                            </span>
+                            <span className="block text-[10px] text-slate-400 mt-0.5">
+                              Comm: {product.defaultCommissionRate}%
+                            </span>
+                          </td>
+
+                          {/* Stock & Quick Eye Button */}
+                          <td className="py-2 px-1 sm:px-2 text-center align-middle whitespace-nowrap">
+                            <div className="inline-flex flex-col items-center">
+                              <div className="flex items-center justify-center gap-1">
+                                <span className={`font-black text-xs sm:text-sm ${isOut ? 'text-rose-600' : isLow ? 'text-amber-600' : 'text-slate-900'}`}>
+                                  {stockAtStore}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={(e) => handleInspectStock(e, product)}
+                                  title="Check branches stock"
+                                  className="p-1 rounded text-slate-300 hover:text-emerald-700 hover:bg-slate-100 transition-colors cursor-pointer"
+                                >
+                                  <Eye className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                              <span className={`text-[9px] font-bold leading-none ${isOut ? 'text-rose-600' : isLow ? 'text-amber-600' : 'text-emerald-700'}`}>
+                                {isOut ? 'Out' : isLow ? 'Low' : 'In Store'}
+                              </span>
+                            </div>
+                          </td>
+
+                          {/* Price & Variable Indicator */}
+                          <td className="py-2 px-1.5 sm:px-3 align-middle whitespace-nowrap">
+                            <div className="flex flex-col">
+                              {product.sellingPriceRange ? (
+                                <>
+                                  <span className="font-black text-emerald-700 text-xs sm:text-sm leading-tight">
+                                    {product.sellingPriceRange} <span className="text-[10px] font-bold text-slate-400">ETB</span>
+                                  </span>
+                                  <span className="text-[9px] font-bold text-amber-700 bg-amber-50 px-1 py-0.2 rounded border border-amber-200 w-fit mt-0.5">
+                                    Variable
+                                  </span>
+                                </>
+                              ) : (
+                                <span className="font-black text-emerald-600 text-xs sm:text-sm leading-tight">
+                                  {formatCurrency(product.sellingPrice)}
+                                </span>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* Action / Compact + Button & Stepper */}
+                          <td className="py-2 pl-1 pr-3 text-right align-middle whitespace-nowrap">
+                            {isOut ? (
+                              <span className="inline-block text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-1 rounded-md">
+                                Out
+                              </span>
+                            ) : inCart ? (
+                              /* Interactive Stepper when in cart */
+                              <div
+                                className="inline-flex items-center rounded-lg bg-emerald-50 border border-emerald-300 p-0.5 shadow-xs ml-auto"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    handleUpdateQuantityDelta(product.id, -1)
+                                  }}
+                                  className="w-6 h-6 sm:w-7 sm:h-7 rounded-md bg-white border border-emerald-200 flex items-center justify-center text-slate-700 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-300 active:scale-90 transition-all cursor-pointer"
+                                  title={inCart.quantity === 1 ? "Remove from cart" : "Decrease quantity"}
+                                >
+                                  {inCart.quantity === 1 ? (
+                                    <Trash2 className="w-3 h-3 text-rose-500" />
+                                  ) : (
+                                    <Minus className="w-3 h-3 text-slate-700" />
+                                  )}
+                                </button>
+
+                                <span className="w-6 sm:w-7 text-center font-black text-xs text-emerald-900 select-none">
+                                  {inCart.quantity}
+                                </span>
+
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    handleUpdateQuantityDelta(product.id, 1)
+                                  }}
+                                  disabled={inCart.quantity >= stockAtStore}
+                                  className="w-6 h-6 sm:w-7 sm:h-7 rounded-md bg-emerald-600 flex items-center justify-center text-white hover:bg-emerald-700 active:scale-90 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shadow-xs"
+                                  title="Increase quantity"
+                                >
+                                  <Plus className="w-3 h-3 text-white" />
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  handleAddToCart(product)
+                                }}
+                                className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-black hover:bg-emerald-600 text-white flex items-center justify-center transition-all active:scale-90 cursor-pointer shadow-xs ml-auto"
+                                title="Add to cart"
+                              >
+                                <Plus className="w-4 h-4" />
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : (
+            /* ══════════════════════════════════════════════════════════════════ */
+            /* CARDS DESIGN: Visual Card Grid with Interactive +/- Stepper         */
+            /* ══════════════════════════════════════════════════════════════════ */
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {filteredProducts.map((product) => {
+                const stockAtStore = activeStore?.stock?.[product.id] || 0
+                const isLow = stockAtStore > 0 && stockAtStore <= (product.minStockThreshold || 5)
+                const isOut = stockAtStore <= 0
+                const inCart = cart.find(i => i.product.id === product.id)
+
+                return (
+                  <div
+                    key={product.id}
+                    onClick={() => !isOut && !inCart && handleAddToCart(product)}
+                    className={`p-4 rounded-2xl border transition-all text-left flex flex-col justify-between touch-manipulation ${
+                      isOut
+                        ? 'bg-slate-50 border-slate-200 opacity-60 cursor-not-allowed'
+                        : inCart
+                        ? 'bg-emerald-50/50 border-emerald-500 ring-2 ring-emerald-500/20 shadow-xs'
+                        : 'bg-white border-slate-200/90 hover:border-emerald-400 hover:shadow-xs cursor-pointer active:scale-[0.98]'
+                    }`}
+                  >
+                    <div>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-1.5 flex-wrap mb-1">
+                            {product.code && (
+                              <span className="font-mono text-[10px] font-bold bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded">
+                                {product.code}
+                              </span>
+                            )}
+                            {product.unit && (
+                              <span className="text-[10px] font-medium text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">
+                                {product.unit}
+                              </span>
+                            )}
+                          </div>
+                          <h4 className="text-sm font-bold text-slate-900 leading-snug">{product.name}</h4>
+                        </div>
+                        <div className="text-right shrink-0">
+                          {product.sellingPriceRange ? (
+                            <>
+                              <span className="text-xs font-extrabold text-emerald-700 block">
+                                {product.sellingPriceRange} ETB
+                              </span>
+                              <span className="text-[9px] text-amber-700 font-semibold bg-amber-50 px-1 py-0.2 rounded border border-amber-200">
+                                Variable Price
+                              </span>
+                            </>
+                          ) : (
+                            <span className="text-sm font-extrabold text-emerald-600 block">
+                              {formatCurrency(product.sellingPrice)}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 pt-2.5 border-t border-slate-100 flex items-center justify-between text-xs">
+                      <span className="text-slate-500 font-medium">
+                        Comm: <span className="font-bold text-slate-800">{product.defaultCommissionRate}%</span>
                       </span>
+                      <div className="flex items-center gap-1.5">
+                        {isOut ? (
+                          <Badge variant="danger">Out of Stock</Badge>
+                        ) : isLow ? (
+                          <Badge variant="warning">{stockAtStore} left</Badge>
+                        ) : (
+                          <Badge variant="success">{stockAtStore} in store</Badge>
+                        )}
+
+                        {/* Check Other Stores Quick Eye Button */}
+                        <button
+                          type="button"
+                          onClick={(e) => handleInspectStock(e, product)}
+                          title="Check stock at other branches"
+                          className="p-1 rounded-lg text-slate-400 hover:text-emerald-700 hover:bg-slate-100 touch-manipulation cursor-pointer"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
-                  </div>
 
-                  <div className="mt-4 pt-2.5 border-t border-slate-100 flex items-center justify-between text-xs">
-                    <span className="text-slate-500 font-medium">
-                      Comm: <span className="font-bold text-slate-800">{product.defaultCommissionRate}%</span>
-                    </span>
-                    <div className="flex items-center gap-1.5">
-                      {isOut ? (
-                        <Badge variant="danger">Out of Stock</Badge>
-                      ) : isLow ? (
-                        <Badge variant="warning">{stockAtStore} left</Badge>
-                      ) : (
-                        <Badge variant="success">{stockAtStore} in store</Badge>
-                      )}
-
-                      {/* Check Other Stores Quick Eye Button */}
-                      <button
-                        type="button"
-                        onClick={(e) => handleInspectStock(e, product)}
-                        title="Check stock at other branches"
-                        className="p-1 rounded-lg text-slate-400 hover:text-emerald-700 hover:bg-slate-100 touch-manipulation"
+                    {/* Interactive Stepper in Cards View */}
+                    {inCart ? (
+                      <div
+                        className="mt-3 pt-2.5 border-t border-emerald-200/80 flex items-center justify-between"
+                        onClick={(e) => e.stopPropagation()}
                       >
-                        <Eye className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
+                        <div className="text-xs font-bold text-emerald-900">
+                          <span>{formatCurrency((inCart.customPrice ?? product.sellingPrice) * inCart.quantity)}</span>
+                        </div>
+                        <div className="inline-flex items-center rounded-lg bg-white border border-emerald-300 p-0.5 shadow-xs">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleUpdateQuantityDelta(product.id, -1)
+                            }}
+                            className="w-7 h-7 rounded-md bg-emerald-50 border border-emerald-200 flex items-center justify-center text-slate-700 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 active:scale-90 transition-all cursor-pointer"
+                            title={inCart.quantity === 1 ? "Remove from cart" : "Decrease quantity"}
+                          >
+                            {inCart.quantity === 1 ? (
+                              <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+                            ) : (
+                              <Minus className="w-3 h-3 text-slate-700" />
+                            )}
+                          </button>
+                          <span className="w-7 text-center font-black text-xs text-emerald-900 select-none">
+                            {inCart.quantity}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleUpdateQuantityDelta(product.id, 1)
+                            }}
+                            disabled={inCart.quantity >= stockAtStore}
+                            className="w-7 h-7 rounded-md bg-emerald-600 flex items-center justify-center text-white hover:bg-emerald-700 active:scale-90 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shadow-xs"
+                            title="Increase quantity"
+                          >
+                            <Plus className="w-3 h-3 text-white" />
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="mt-3 pt-2 flex justify-end">
+                        <button
+                          type="button"
+                          disabled={isOut}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleAddToCart(product)
+                          }}
+                          className="w-8 h-8 rounded-lg bg-black hover:bg-emerald-600 text-white flex items-center justify-center transition-all active:scale-90 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shadow-xs"
+                          title="Add to cart"
+                        >
+                          <Plus className="w-4 h-4" />
+                        </button>
+                      </div>
+                    )}
                   </div>
-
-                  {inCart && (
-                    <div className="mt-2 py-1 px-2.5 bg-emerald-600 text-white rounded-lg text-[11px] font-bold flex items-center justify-between">
-                      <span>In Cart</span>
-                      <span>{inCart.quantity}x &bull; {formatCurrency(product.sellingPrice * inCart.quantity)}</span>
-                    </div>
-                  )}
-                </div>
-              )
-            })}
-          </div>
+                )
+              })}
+            </div>
+          )}
         </div>
 
         {/* Desktop Right Side Panel: Checkout */}
@@ -700,38 +1203,127 @@ export function PosPage() {
       {isMultiStoreModalOpen && (
         <Modal
           isOpen={isMultiStoreModalOpen}
-          onClose={() => setIsMultiStoreModalOpen(false)}
+          onClose={() => {
+            setIsMultiStoreModalOpen(false)
+            setInspectSearchQuery('')
+          }}
           title="Branch Stock Availability"
         >
-          <div className="space-y-4 text-xs">
+          <div className="space-y-3.5 text-xs">
+            {/* Search Input for Selecting Product */}
             <div>
-              <label className="block text-slate-500 font-medium mb-1">Select Product to Check:</label>
-              <select
-                value={inspectProduct?.id || ''}
-                onChange={(e) => setInspectProduct(products.find(p => p.id === e.target.value))}
-                className="w-full p-2.5 bg-white border border-slate-300 rounded-xl font-bold min-h-[44px]"
-              >
-                {products.map(p => (
-                  <option key={p.id} value={p.id}>
-                    {p.name} - {formatCurrency(p.sellingPrice)}
-                  </option>
-                ))}
-              </select>
+              <label className="block text-slate-700 font-bold mb-1.5 text-xs">
+                Search Product to Check Stock:
+              </label>
+              <div className="relative">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+                <input
+                  type="text"
+                  placeholder="Type product name, code (e.g. SP-001)..."
+                  value={inspectSearchQuery}
+                  onChange={(e) => setInspectSearchQuery(e.target.value)}
+                  className="w-full pl-9 pr-8 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white min-h-[42px]"
+                  autoFocus
+                />
+                {inspectSearchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setInspectSearchQuery('')}
+                    className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600 p-1 cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
             </div>
 
+            {/* Matching Products Search Results List for Selection */}
+            <div>
+              <div className="flex items-center justify-between mb-1 px-0.5">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                  {inspectSearchQuery ? `Search Results (${inspectFilteredProducts.length})` : 'Select Product from Catalog'}
+                </span>
+                {inspectProduct && (
+                  <span className="text-[11px] font-semibold text-emerald-700">
+                    Selected: {inspectProduct.name}
+                  </span>
+                )}
+              </div>
+
+              <div className="max-h-40 overflow-y-auto space-y-1 p-1 bg-slate-50/70 rounded-xl border border-slate-200 no-scrollbar">
+                {inspectFilteredProducts.length === 0 ? (
+                  <div className="p-4 text-center text-slate-400 text-xs">
+                    No products found matching &ldquo;{inspectSearchQuery}&rdquo;
+                  </div>
+                ) : (
+                  inspectFilteredProducts.map((p) => {
+                    const isSelected = inspectProduct?.id === p.id
+                    return (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => setInspectProduct(p)}
+                        className={`w-full px-2.5 py-2 rounded-lg text-left flex items-center justify-between transition-all cursor-pointer ${
+                          isSelected
+                            ? 'bg-slate-900 text-white shadow-xs'
+                            : 'bg-white hover:bg-slate-100 text-slate-800 border border-slate-200/70'
+                        }`}
+                      >
+                        <div className="flex items-center gap-1.5 min-w-0 pr-2">
+                          {p.code && (
+                            <span className={`font-mono text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0 ${
+                              isSelected ? 'bg-slate-800 text-blue-300' : 'bg-blue-50 text-blue-700 border border-blue-200'
+                            }`}>
+                              {p.code}
+                            </span>
+                          )}
+                          <span className="font-bold text-xs truncate">{p.name}</span>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className={`text-xs font-black ${isSelected ? 'text-emerald-400' : 'text-emerald-700'}`}>
+                            {p.sellingPriceRange ? `${p.sellingPriceRange} ETB` : formatCurrency(p.sellingPrice)}
+                          </span>
+                          {isSelected && (
+                            <CheckCircle className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                          )}
+                        </div>
+                      </button>
+                    )
+                  })
+                )}
+              </div>
+            </div>
+
+            {/* Currently Inspected Product & Stock Across All Locations */}
             {inspectProduct && (
-              <div className="space-y-2 pt-2">
-                <p className="text-xs font-bold text-slate-700">Stock across all locations:</p>
+              <div className="space-y-2 pt-2 border-t border-slate-200">
+                <div className="flex items-center justify-between px-0.5">
+                  <p className="text-xs font-bold text-slate-800">
+                    Stock across all locations:
+                  </p>
+                  <div className="flex items-center gap-1.5">
+                    {inspectProduct.code && (
+                      <span className="font-mono text-[10px] font-bold bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded">
+                        {inspectProduct.code}
+                      </span>
+                    )}
+                    <span className="text-xs font-black text-emerald-700">
+                      {inspectProduct.sellingPriceRange ? `${inspectProduct.sellingPriceRange} ETB` : formatCurrency(inspectProduct.sellingPrice)}
+                    </span>
+                  </div>
+                </div>
                 
                 {/* Central Warehouse */}
-                {warehouses.map(wh => {
-                  const qty = wh.stock[inspectProduct.id] || 0
+                {(warehouses || []).map(wh => {
+                  const qty = wh?.stock?.[inspectProduct?.id] || 0
+                  const isCurrent = wh?.id === activeStore?.id
                   return (
-                    <div key={wh.id} className="p-3 bg-purple-50/70 border border-purple-200 rounded-xl flex items-center justify-between">
+                    <div key={wh.id} className={`p-3 border rounded-xl flex items-center justify-between ${isCurrent ? 'bg-purple-50/90 border-purple-300' : 'bg-purple-50/50 border-purple-200'}`}>
                       <div>
                         <div className="font-bold text-purple-900 flex items-center gap-1.5">
                           <Warehouse className="w-3.5 h-3.5 text-purple-700" />
                           <span>{wh.name}</span>
+                          {isCurrent && <span className="text-[10px] text-purple-800 font-bold">(Selected)</span>}
                         </div>
                         <div className="text-[10px] text-purple-700">{wh.location}</div>
                       </div>
@@ -743,16 +1335,16 @@ export function PosPage() {
                 })}
 
                 {/* Retail Stores */}
-                {stores.map(store => {
-                  const qty = store.stock[inspectProduct.id] || 0
-                  const isCurrent = store.id === activeStore.id
+                {(stores || []).map(store => {
+                  const qty = store?.stock?.[inspectProduct?.id] || 0
+                  const isCurrent = store?.id === activeStore?.id
                   return (
                     <div key={store.id} className={`p-3 border rounded-xl flex items-center justify-between ${isCurrent ? 'bg-emerald-50/70 border-emerald-200' : 'bg-slate-50 border-slate-200'}`}>
                       <div>
                         <div className="font-bold text-slate-900 flex items-center gap-1.5">
                           <Store className="w-3.5 h-3.5 text-slate-600" />
                           <span>{store.name}</span>
-                          {isCurrent && <span className="text-[10px] text-emerald-700 font-bold">(Your Store)</span>}
+                          {isCurrent && <span className="text-[10px] text-emerald-700 font-bold">(Selected)</span>}
                         </div>
                         <div className="text-[10px] text-slate-500">{store.location}</div>
                       </div>
@@ -765,12 +1357,29 @@ export function PosPage() {
               </div>
             )}
 
-            <div className="pt-2 flex justify-end">
+            <div className="pt-2 flex items-center gap-2">
+              {inspectProduct && (
+                <Button
+                  variant="outline"
+                  size="md"
+                  onClick={() => {
+                    handleAddToCart(inspectProduct)
+                  }}
+                  disabled={(activeStore?.stock?.[inspectProduct?.id] || 0) <= 0}
+                  className="flex-1 font-bold min-h-[44px] border-emerald-500 text-emerald-700 hover:bg-emerald-50 cursor-pointer"
+                >
+                  <Plus className="w-4 h-4 mr-1" />
+                  <span>Add to Cart</span>
+                </Button>
+              )}
               <Button
                 variant="primary"
                 size="md"
-                onClick={() => setIsMultiStoreModalOpen(false)}
-                className="w-full sm:w-auto font-bold min-h-[44px]"
+                onClick={() => {
+                  setIsMultiStoreModalOpen(false)
+                  setInspectSearchQuery('')
+                }}
+                className="flex-1 font-bold min-h-[44px] cursor-pointer"
               >
                 Close Stock View
               </Button>

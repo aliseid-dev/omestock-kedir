@@ -13,6 +13,7 @@ import {
 } from 'lucide-react'
 import { useTenant } from '../context/TenantContext'
 import { useAuth } from '../context/AuthContext'
+import { useToast } from '../context/ToastContext'
 import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'
 import { Badge } from '../components/ui/Badge'
@@ -21,6 +22,7 @@ import { formatDate, exportToExcel } from '../lib/utils'
 export function AuditTrailPage() {
   const { auditLogs } = useTenant()
   const { isOwner, currentUser } = useAuth()
+  const { toast } = useToast()
   const [filterAction, setFilterAction] = useState('ALL')
   const [searchTerm, setSearchTerm] = useState('')
 
@@ -63,6 +65,7 @@ export function AuditTrailPage() {
       Target: l.target || 'General',
     }))
     exportToExcel(exportData, 'OMESTOCK_Audit_Trail')
+    toast.success('Audit Logs Exported', 'Audit trail exported to Excel.')
   }
 
   const getActionBadge = (action) => {
@@ -70,7 +73,7 @@ export function AuditTrailPage() {
       case 'SALE_RECORDED':
         return <Badge variant="success">Sale</Badge>
       case 'WAREHOUSE_INBOUND':
-        return <Badge variant="purple">Wh Inbound</Badge>
+        return <Badge variant="purple">Wh Purchase</Badge>
       case 'PRODUCT_CREATED':
         return <Badge variant="info">New Product</Badge>
       case 'STOCK_TRANSFER':

@@ -14,16 +14,23 @@ import {
   Sparkles,
   RefreshCw,
   Copy,
-  Check
+  Check,
+  Trash2,
+  AlertTriangle,
+  RotateCcw,
+  Lock
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { useTenant } from '../context/TenantContext'
+import { useToast } from '../context/ToastContext'
 import { Button } from '../components/ui/Button'
 import { Badge } from '../components/ui/Badge'
 import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card'
 
 export function ProfilePage() {
+  const { toast } = useToast()
   const {
+    clerkUser,
     firebaseUser,
     updateUserProfile,
     sendResetPassword,
@@ -36,7 +43,10 @@ export function ProfilePage() {
     currentUser,
     isOwner,
     stores,
-    clearActiveOrganization
+    clearActiveOrganization,
+    clearDatabaseData,
+    wipeAndResetAccount,
+    deleteAccount
   } = useTenant()
 
   // Display Name editing
@@ -45,6 +55,70 @@ export function ProfilePage() {
   const [nameSuccess, setNameSuccess] = useState('')
   const [nameError, setNameError] = useState('')
 
+  // Danger Zone States
+  const [clearingData, setClearingData] = useState(false)
+  const [wipingAccount, setWipingAccount] = useState(false)
+  const [deletingUser, setDeletingUser] = useState(false)
+
+  const handleClearDatabase = async () => {
+    const confirmed = window.confirm(
+      'Are you sure you want to clear all inventory products, warehouse stock, retail stock, and sales records? Your organization and account will remain, but all data will be cleared so you can start fresh.'
+    )
+    if (!confirmed) return
+
+    setClearingData(true)
+    try {
+      await clearDatabaseData()
+      toast.success('Database Cleared', 'All products, stock counts, and sales records cleared.')
+    } catch (err) {
+      console.error(err)
+      toast.error('Clear Failed', 'Failed to clear data: ' + (err?.message || 'Unknown error'))
+    } finally {
+      setClearingData(false)
+    }
+  }
+
+  const handleWipeAndReset = async () => {
+    const confirmed = window.confirm(
+      'DANGER: This will completely wipe your business workspace, products, stores, and sales data, returning you to the clean setup screen to start fresh. Proceed?'
+    )
+    if (!confirmed) return
+
+    setWipingAccount(true)
+    try {
+      await wipeAndResetAccount()
+      window.location.reload()
+    } catch (err) {
+      console.error(err)
+      toast.error('Reset Failed', 'Failed to reset workspace: ' + (err?.message || 'Unknown error'))
+    } finally {
+      setWipingAccount(false)
+    }
+  }
+
+  const handleDeleteAccount = async () => {
+    const confirmed = window.confirm(
+      'DANGER: Are you sure you want to permanently delete your account? This will remove your profile from the database and delete your Clerk login. This action CANNOT be undone!'
+    )
+    if (!confirmed) return
+
+    setDeletingUser(true)
+    try {
+      if (clerkUser?.id) {
+        await deleteAccount(clerkUser.id)
+      }
+      if (clerkUser?.delete) {
+        await clerkUser.delete()
+      } else {
+        await signOutUser()
+      }
+    } catch (err) {
+      console.error(err)
+      toast.error('Deletion Failed', 'Failed to delete account: ' + (err?.message || 'Unknown error'))
+    } finally {
+      setDeletingUser(false)
+    }
+  }
 
   // Password Reset Email
   const [sendingReset, setSendingReset] = useState(false)
@@ -59,6 +133,7 @@ export function ProfilePage() {
     if (!activeOrg?.companyCode) return
     navigator.clipboard.writeText(activeOrg.companyCode)
     setCopiedOrgCode(true)
+    toast.info('Code Copied', 'Organization invitation code copied to clipboard.')
     setTimeout(() => setCopiedOrgCode(false), 2000)
   }
 
@@ -68,6 +143,7 @@ export function ProfilePage() {
     setNameSuccess('')
     if (!displayName.trim()) {
       setNameError('Name cannot be blank.')
+      toast.warning('Name Required', 'Name cannot be blank.')
       return
     }
 
@@ -75,9 +151,11 @@ export function ProfilePage() {
     try {
       await updateUserProfile(displayName)
       setNameSuccess('Profile name updated successfully!')
+      toast.success('Profile Updated', 'Profile name updated successfully!')
       setTimeout(() => setNameSuccess(''), 3000)
     } catch (err) {
       setNameError(err?.message || 'Failed to update profile name.')
+      toast.error('Update Failed', err?.message || 'Failed to update profile name.')
     } finally {
       setSavingName(false)
     }
@@ -91,8 +169,10 @@ export function ProfilePage() {
     try {
       await sendResetPassword(firebaseUser.email)
       setResetSent(true)
+      toast.success('Reset Email Sent', `Password reset link sent to ${firebaseUser.email}.`)
     } catch (err) {
       setResetError(err?.message || 'Failed to send password reset email.')
+      toast.error('Email Failed', err?.message || 'Failed to send password reset email.')
     } finally {
       setSendingReset(false)
     }
@@ -102,6 +182,7 @@ export function ProfilePage() {
     if (!firebaseUser?.uid) return
     navigator.clipboard.writeText(firebaseUser.uid)
     setCopiedUid(true)
+    toast.info('UID Copied', 'Account User ID copied to clipboard.')
     setTimeout(() => setCopiedUid(false), 2000)
   }
 
@@ -345,6 +426,81 @@ export function ProfilePage() {
         </CardContent>
       </Card>
 
+      {/* Danger Zone: Clear Database & Delete Account */}
+      <Card className="rounded-3xl border border-rose-200 bg-rose-50/30 shadow-xs">
+        <CardHeader className="pb-3 border-b border-rose-100">
+          <CardTitle className="text-sm font-bold text-rose-900 flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-rose-600" />
+            Danger Zone & Data Reset
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="pt-4 space-y-4">
+          <p className="text-xs text-slate-600">
+            Need to start fresh or remove your data? Use the actions below with care.
+          </p>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            {/* 1. Clear Inventory & Sales */}
+            <div className="p-4 rounded-2xl bg-white border border-amber-200 flex flex-col justify-between gap-3">
+              <div>
+                <h5 className="text-xs font-bold text-slate-900">Clear Inventory & Sales</h5>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Deletes all products and sales, resetting stock counts to 0. Keeps your company code and account.
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={clearingData}
+                onClick={handleClearDatabase}
+                className="w-full font-bold text-xs border-amber-300 text-amber-900 hover:bg-amber-50"
+              >
+                {clearingData ? 'Clearing Data...' : 'Clear All Data'}
+              </Button>
+            </div>
+
+            {/* 2. Wipe Workspace & Start Fresh */}
+            <div className="p-4 rounded-2xl bg-white border border-rose-200 flex flex-col justify-between gap-3">
+              <div>
+                <h5 className="text-xs font-bold text-rose-950">Wipe & Start Fresh</h5>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Wipes this workspace, branches, and records. Brings you back to clean company onboarding setup.
+                </p>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                disabled={wipingAccount}
+                onClick={handleWipeAndReset}
+                className="w-full font-bold text-xs bg-rose-600 hover:bg-rose-700 text-white"
+              >
+                {wipingAccount ? 'Wiping Workspace...' : 'Wipe & Start Fresh'}
+              </Button>
+            </div>
+
+            {/* 3. Delete Account */}
+            <div className="p-4 rounded-2xl bg-white border border-slate-300 flex flex-col justify-between gap-3">
+              <div>
+                <h5 className="text-xs font-bold text-slate-900">Delete Account</h5>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Permanently deletes your account from the database and Clerk authentication.
+                </p>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                disabled={deletingUser}
+                onClick={handleDeleteAccount}
+                className="w-full font-bold text-xs bg-slate-900 hover:bg-slate-800 text-white"
+              >
+                <Trash2 className="w-3.5 h-3.5 mr-1" />
+                <span>{deletingUser ? 'Deleting Account...' : 'Delete Account'}</span>
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Session Management */}
       <div className="bg-slate-100 rounded-3xl p-5 sm:p-6 flex flex-col sm:flex-row items-center justify-between gap-4">

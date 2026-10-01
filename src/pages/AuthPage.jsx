@@ -1,6 +1,6 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useSignIn, useSignUp } from '@clerk/clerk-react'
-import { Loader2, AlertCircle, Eye, EyeOff } from 'lucide-react'
+import { Loader2, AlertCircle, Eye, EyeOff, ShieldCheck, User } from 'lucide-react'
 
 export function AuthPage() {
   const { isLoaded: signInLoaded, signIn, setActive: setSignInActive } = useSignIn()
@@ -13,9 +13,32 @@ export function AuthPage() {
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
 
-  // Verification step state
+  // Remember me & returning user state
+  const [rememberMe, setRememberMe] = useState(true)
+  const [isReturningUser, setIsReturningUser] = useState(false)
+
+  useEffect(() => {
+    try {
+      const savedEmail = localStorage.getItem('omestock_remembered_email')
+      if (savedEmail) {
+        setEmail(savedEmail)
+        setIsReturningUser(true)
+      }
+    } catch {
+      // Ignore localStorage exceptions in private browsing
+    }
+  }, [])
+
+  // Sign up email verification step state
   const [pendingVerification, setPendingVerification] = useState(false)
   const [code, setCode] = useState('')
+
+  // 2-Factor Authentication (MFA / Second Factor) state
+  const [pendingSecondFactor, setPendingSecondFactor] = useState(false)
+  const [secondFactorCode, setSecondFactorCode] = useState('')
+  const [secondFactorStrategy, setSecondFactorStrategy] = useState('')
+  const [availableSecondFactors, setAvailableSecondFactors] = useState([])
+  const [secondFactorHint, setSecondFactorHint] = useState('')
 
   const [loading, setLoading] = useState(false)
   const [oauthLoading, setOauthLoading] = useState(null) // 'oauth_google' | 'oauth_apple' | null
@@ -52,6 +75,18 @@ export function AuthPage() {
     }
   }
 
+  const persistRememberedEmail = (emailToSave) => {
+    try {
+      if (rememberMe && emailToSave) {
+        localStorage.setItem('omestock_remembered_email', emailToSave.trim())
+      } else {
+        localStorage.removeItem('omestock_remembered_email')
+      }
+    } catch {
+      // Ignore storage restrictions
+    }
+  }
+
   // Handle Sign In submission
   const handleSignIn = async (e) => {
     e.preventDefault()
@@ -66,9 +101,45 @@ export function AuthPage() {
       })
 
       if (result.status === 'complete') {
+        persistRememberedEmail(email)
         await setSignInActive({ session: result.createdSessionId })
+      } else if (result.status === 'needs_second_factor') {
+        const factors = result.supportedSecondFactors || []
+        setAvailableSecondFactors(factors)
+
+        // Choose preferred strategy: totp (authenticator app) or phone_code or the first available
+        const primaryFactor =
+          factors.find((f) => f.strategy === 'totp') ||
+          factors.find((f) => f.strategy === 'phone_code') ||
+          factors[0]
+
+        const strategy = primaryFactor?.strategy || 'totp'
+        setSecondFactorStrategy(strategy)
+        setSecondFactorCode('')
+
+        if (strategy === 'phone_code' || strategy === 'email_code') {
+          await signIn.prepareSecondFactor({
+            strategy,
+            ...(primaryFactor?.phoneNumberId ? { phoneNumberId: primaryFactor.phoneNumberId } : {}),
+            ...(primaryFactor?.emailAddressId ? { emailAddressId: primaryFactor.emailAddressId } : {}),
+          })
+          setSecondFactorHint(
+            strategy === 'phone_code'
+              ? `Enter the verification code sent via SMS to ${primaryFactor?.safeIdentifier || 'your phone'}.`
+              : `Enter the verification code sent to ${primaryFactor?.safeIdentifier || 'your email'}.`
+          )
+        } else if (strategy === 'totp') {
+          setSecondFactorHint('Enter the 6-digit code from your authenticator app (e.g., Google Authenticator).')
+        } else if (strategy === 'backup_code') {
+          setSecondFactorHint('Enter one of your backup recovery codes.')
+        } else {
+          setSecondFactorHint('Enter your two-factor verification code.')
+        }
+
+        setPendingSecondFactor(true)
       } else {
         console.warn('Sign-in status requires additional step:', result)
+        setError(`Additional verification required (${result.status}). Please check your account.`)
       }
     } catch (err) {
       console.error('Sign-in error:', err)
@@ -76,6 +147,71 @@ export function AuthPage() {
         err?.errors?.[0]?.longMessage ||
           err?.errors?.[0]?.message ||
           'Invalid email or password. Please try again.'
+      )
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Switch between available 2FA methods (e.g., TOTP vs SMS vs Backup Code)
+  const handleSelectSecondFactorStrategy = async (strategy) => {
+    setLoading(true)
+    setError('')
+    try {
+      const factor = availableSecondFactors.find((f) => f.strategy === strategy)
+      setSecondFactorStrategy(strategy)
+      setSecondFactorCode('')
+
+      if (strategy === 'phone_code' || strategy === 'email_code') {
+        await signIn.prepareSecondFactor({
+          strategy,
+          ...(factor?.phoneNumberId ? { phoneNumberId: factor.phoneNumberId } : {}),
+          ...(factor?.emailAddressId ? { emailAddressId: factor.emailAddressId } : {}),
+        })
+        setSecondFactorHint(
+          strategy === 'phone_code'
+            ? `Enter the SMS code sent to ${factor?.safeIdentifier || 'your phone'}.`
+            : `Enter the verification code sent to ${factor?.safeIdentifier || 'your email'}.`
+        )
+      } else if (strategy === 'totp') {
+        setSecondFactorHint('Enter the 6-digit code from your authenticator app.')
+      } else if (strategy === 'backup_code') {
+        setSecondFactorHint('Enter one of your backup recovery codes.')
+      }
+    } catch (err) {
+      console.error('Error switching 2FA strategy:', err)
+      setError(err?.errors?.[0]?.longMessage || err?.errors?.[0]?.message || 'Failed to switch verification method.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Verify 2FA Code
+  const handleVerifySecondFactor = async (e) => {
+    e.preventDefault()
+    if (!signInLoaded) return
+    setLoading(true)
+    setError('')
+
+    try {
+      const res = await signIn.attemptSecondFactor({
+        strategy: secondFactorStrategy,
+        code: secondFactorCode.trim(),
+      })
+
+      if (res.status === 'complete') {
+        persistRememberedEmail(email)
+        await setSignInActive({ session: res.createdSessionId })
+      } else {
+        console.warn('Second factor verification status:', res.status)
+        setError(`Verification status: ${res.status}. Please check your code.`)
+      }
+    } catch (err) {
+      console.error('2FA verification error:', err)
+      setError(
+        err?.errors?.[0]?.longMessage ||
+          err?.errors?.[0]?.message ||
+          'Invalid verification code. Please try again.'
       )
     } finally {
       setLoading(false)
@@ -162,11 +298,116 @@ export function AuthPage() {
         {error && (
           <div className="mb-5 p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-start gap-2.5">
             <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-            <span className="leading-relaxed">{error}</span>
+            <div className="flex-1">
+              <span className="leading-relaxed">{error}</span>
+              {isSignUp && (error.toLowerCase().includes('already') || error.toLowerCase().includes('exists')) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setError('')
+                    setIsSignUp(false)
+                  }}
+                  className="mt-1.5 block font-bold text-blue-700 hover:underline cursor-pointer"
+                >
+                  Already registered? Click here to Sign In &rarr;
+                </button>
+              )}
+            </div>
           </div>
         )}
 
-        {pendingVerification ? (
+        {pendingSecondFactor ? (
+          /* 2-Factor Authentication (MFA) Step */
+          <form onSubmit={handleVerifySecondFactor} className="space-y-4">
+            <div className="text-center mb-4">
+              <div className="w-12 h-12 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center mx-auto mb-3 border border-blue-100 shadow-sm">
+                <ShieldCheck className="w-6 h-6" />
+              </div>
+              <h2 className="text-xl font-bold text-slate-900">Two-Factor Authentication</h2>
+              <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
+                {secondFactorHint || 'Enter your verification code to complete sign-in.'}
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                {secondFactorStrategy === 'backup_code' ? 'Backup Code' : 'Verification Code'}
+              </label>
+              <input
+                type="text"
+                required
+                autoFocus
+                value={secondFactorCode}
+                onChange={(e) => setSecondFactorCode(e.target.value)}
+                placeholder={secondFactorStrategy === 'backup_code' ? 'Enter backup code' : 'Enter 6-digit code'}
+                className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-600 text-center tracking-widest font-mono text-lg font-bold"
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading || !secondFactorCode.trim()}
+              className="w-full py-3 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-semibold rounded-xl text-sm transition-all flex items-center justify-center gap-2 cursor-pointer shadow-md shadow-blue-600/20"
+            >
+              {loading ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Verifying...</span>
+                </>
+              ) : (
+                'Verify & Sign In'
+              )}
+            </button>
+
+            {/* Alternative Factors Switch if more than 1 available */}
+            {availableSecondFactors.length > 1 && (
+              <div className="pt-2 text-center border-t border-slate-100">
+                <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
+                  Try another method
+                </p>
+                <div className="flex flex-wrap justify-center gap-1.5">
+                  {availableSecondFactors.map((f, idx) => {
+                    if (f.strategy === secondFactorStrategy) return null
+                    const label =
+                      f.strategy === 'totp'
+                        ? 'Authenticator App'
+                        : f.strategy === 'phone_code'
+                        ? 'SMS Code'
+                        : f.strategy === 'email_code'
+                        ? 'Email Code'
+                        : f.strategy === 'backup_code'
+                        ? 'Backup Code'
+                        : f.strategy
+                    return (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => handleSelectSecondFactorStrategy(f.strategy)}
+                        className="text-xs px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium cursor-pointer transition-colors"
+                      >
+                        Use {label}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
+            <div className="text-center pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setPendingSecondFactor(false)
+                  setSecondFactorCode('')
+                  setError('')
+                }}
+                className="text-xs text-slate-500 hover:text-slate-800 font-medium cursor-pointer"
+              >
+                Cancel and back to sign in
+              </button>
+            </div>
+          </form>
+        ) : pendingVerification ? (
           /* Email Verification Step */
           <form onSubmit={handleVerifyCode} className="space-y-4">
             <div className="text-center mb-4">
@@ -380,19 +621,59 @@ export function AuthPage() {
             ) : (
               /* Sign In Form */
               <form onSubmit={handleSignIn} className="space-y-3.5">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                    Email Address
-                  </label>
-                  <input
-                    type="email"
-                    required
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="name@example.com"
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-600 text-sm font-medium"
-                  />
-                </div>
+                {isReturningUser ? (
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
+                        Account
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsReturningUser(false)
+                          setEmail('')
+                        }}
+                        className="text-xs font-bold text-blue-600 hover:text-blue-700 hover:underline cursor-pointer"
+                      >
+                        Use another account
+                      </button>
+                    </div>
+                    <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-200">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="w-8 h-8 rounded-lg bg-blue-600 text-white font-bold flex items-center justify-center text-xs shrink-0 shadow-xs">
+                          {email ? email.charAt(0).toUpperCase() : <User className="w-4 h-4" />}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+                            Welcome back
+                          </div>
+                          <div className="text-sm font-bold text-slate-900 truncate">{email}</div>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setIsReturningUser(false)}
+                        className="text-xs text-slate-500 hover:text-slate-800 font-medium px-2 py-1 hover:bg-slate-200/60 rounded-md cursor-pointer shrink-0 transition-colors"
+                      >
+                        Edit
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                      Email Address
+                    </label>
+                    <input
+                      type="email"
+                      required
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="name@example.com"
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-600 text-sm font-medium"
+                    />
+                  </div>
+                )}
 
                 <div>
                   <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
@@ -402,6 +683,7 @@ export function AuthPage() {
                     <input
                       type={showPassword ? 'text' : 'password'}
                       required
+                      autoFocus={isReturningUser}
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       placeholder="Enter your password"
@@ -415,6 +697,19 @@ export function AuthPage() {
                       {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
                   </div>
+                </div>
+
+                {/* Remember Me Option */}
+                <div className="flex items-center justify-between text-xs text-slate-600 pt-0.5">
+                  <label className="flex items-center gap-2 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={rememberMe}
+                      onChange={(e) => setRememberMe(e.target.checked)}
+                      className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                    />
+                    <span className="font-medium text-slate-700">Remember me on this device</span>
+                  </label>
                 </div>
 
                 <button
@@ -458,9 +753,6 @@ export function AuthPage() {
       <div className="mt-8 text-center text-xs text-slate-400 select-none">
         <p className="font-medium">
           Powered by <span className="font-bold text-white tracking-wider">OMEDLA</span>
-        </p>
-        <p className="text-[11px] text-slate-500 mt-0.5">
-          OMESTOCK is an official Omedla product
         </p>
       </div>
     </div>

@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useRef, useEffect } from 'react'
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard,
@@ -18,14 +18,19 @@ import {
   User,
   Copy,
   Check,
-  KeyRound
+  KeyRound,
+  Trash2,
+  AlertTriangle,
+  RotateCcw
 } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 import { useTenant } from '../../context/TenantContext'
+import { useToast } from '../../context/ToastContext'
 import { Badge } from '../ui/Badge'
 
 export function MainLayout() {
-  const { currentUser, users, switchUser, permissions, isOwner, lockSession, signOutUser, firebaseUser } = useAuth()
+  const { toast } = useToast()
+  const { currentUser, clerkUser, users, switchUser, permissions, isOwner, lockSession, signOutUser, firebaseUser } = useAuth()
   const {
     clientId,
     tenantName,
@@ -36,13 +41,102 @@ export function MainLayout() {
     isFirebaseLive,
     sales,
     loading,
-    updateBusinessName
+    updateBusinessName,
+    clearDatabaseData,
+    wipeAndResetAccount,
+    deleteAccount
   } = useTenant()
 
   const [showUserMenu, setShowUserMenu] = useState(false)
   const [showTenantMenu, setShowTenantMenu] = useState(false)
   const [showMobileMoreSheet, setShowMobileMoreSheet] = useState(false)
   const [showBizSettings, setShowBizSettings] = useState(false)
+
+  const userMenuRef = useRef(null)
+  const desktopUserMenuRef = useRef(null)
+
+  // Close menus when clicking outside
+  useEffect(() => {
+    if (!showUserMenu) return
+    const handleOutside = (e) => {
+      const clickedMobileMenu = userMenuRef.current && userMenuRef.current.contains(e.target)
+      const clickedDesktopMenu = desktopUserMenuRef.current && desktopUserMenuRef.current.contains(e.target)
+      if (!clickedMobileMenu && !clickedDesktopMenu) {
+        setShowUserMenu(false)
+      }
+    }
+    document.addEventListener('pointerdown', handleOutside)
+    document.addEventListener('touchstart', handleOutside)
+    return () => {
+      document.removeEventListener('pointerdown', handleOutside)
+      document.removeEventListener('touchstart', handleOutside)
+    }
+  }, [showUserMenu])
+  const [clearingData, setClearingData] = useState(false)
+  const [wipingAccount, setWipingAccount] = useState(false)
+  const [deletingUser, setDeletingUser] = useState(false)
+
+  const handleClearDatabase = async () => {
+    const confirmed = window.confirm(
+      'Are you sure you want to clear all inventory products, warehouse stock, retail stock, and sales records? Your organization and account will remain, but all data will be cleared so you can start fresh.'
+    )
+    if (!confirmed) return
+
+    setClearingData(true)
+    try {
+      await clearDatabaseData()
+      toast.success('Database Cleared', 'All products, stock counts, and sales records cleared.')
+      setShowBizSettings(false)
+    } catch (err) {
+      console.error(err)
+      toast.error('Clear Failed', 'Failed to clear data: ' + (err?.message || 'Unknown error'))
+    } finally {
+      setClearingData(false)
+    }
+  }
+
+  const handleWipeAndReset = async () => {
+    const confirmed = window.confirm(
+      'DANGER: This will completely wipe your business workspace, products, stores, and sales data, returning you to the clean setup screen to start fresh. Proceed?'
+    )
+    if (!confirmed) return
+
+    setWipingAccount(true)
+    try {
+      await wipeAndResetAccount()
+      setShowBizSettings(false)
+      window.location.reload()
+    } catch (err) {
+      console.error(err)
+      toast.error('Reset Failed', 'Failed to reset workspace: ' + (err?.message || 'Unknown error'))
+    } finally {
+      setWipingAccount(false)
+    }
+  }
+
+  const handleDeleteAccount = async () => {
+    const confirmed = window.confirm(
+      'DANGER: Are you sure you want to permanently delete your account? This will remove your profile from the database and delete your Clerk login. This action CANNOT be undone!'
+    )
+    if (!confirmed) return
+
+    setDeletingUser(true)
+    try {
+      if (clerkUser?.id) {
+        await deleteAccount(clerkUser.id)
+      }
+      if (clerkUser?.delete) {
+        await clerkUser.delete()
+      } else {
+        await signOutUser()
+      }
+    } catch (err) {
+      console.error(err)
+      toast.error('Deletion Failed', 'Failed to delete account: ' + (err?.message || 'Unknown error'))
+    } finally {
+      setDeletingUser(false)
+    }
+  }
   const [bizNameEdit, setBizNameEdit] = useState('')
   const [savingBizName, setSavingBizName] = useState(false)
   const [copiedCode, setCopiedCode] = useState(false)
@@ -53,6 +147,7 @@ export function MainLayout() {
     if (!code) return
     navigator.clipboard.writeText(code)
     setCopiedCode(true)
+    toast.info('Code Copied', 'Company invitation code copied to clipboard.')
     setTimeout(() => setCopiedCode(false), 2000)
   }
 
@@ -76,10 +171,12 @@ export function MainLayout() {
   const handleSaveBizName = async (e) => {
     e.preventDefault()
     if (!bizNameEdit.trim()) return
+    const newName = bizNameEdit.trim()
     setSavingBizName(true)
-    await updateBusinessName(bizNameEdit.trim())
+    await updateBusinessName(newName)
     setSavingBizName(false)
     setShowBizSettings(false)
+    toast.success('Workspace Renamed', `Organization renamed to "${newName}".`)
   }
 
   // Base navigation items - Core operational focus: POS, Stock, Unpaid Sales, Staff & Audit Trail
@@ -143,7 +240,7 @@ export function MainLayout() {
         {/* Brand & Active Organization Header */}
         <div className="p-5 border-b border-slate-100 space-y-4">
           <Link to="/pos" className="flex items-center gap-3 group">
-            <div className="w-10 h-10 rounded-2xl bg-slate-900 text-white flex items-center justify-center font-black text-xl shadow-xs group-hover:bg-emerald-600 transition-colors">
+            <div className="w-10 h-10 rounded-xl bg-black text-white flex items-center justify-center font-black text-xl shadow-xs group-hover:bg-slate-800 transition-colors">
               O
             </div>
             <div>
@@ -267,20 +364,20 @@ export function MainLayout() {
             to="/profile"
             className="flex items-center gap-3 p-2 rounded-2xl hover:bg-white transition-colors border border-transparent hover:border-slate-200"
           >
-            <div className="w-9 h-9 rounded-xl bg-emerald-100 text-emerald-800 font-extrabold text-xs flex items-center justify-center border border-emerald-200 shrink-0">
-              {currentUser.avatar}
+            <div className="w-9 h-9 rounded-xl bg-slate-900 text-white font-black text-xs flex items-center justify-center shadow-xs shrink-0">
+              {currentUser?.avatar || currentUser?.name?.charAt(0)?.toUpperCase() || 'U'}
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-1.5">
                 <span className="text-xs font-bold text-slate-900 truncate">
-                  {currentUser.name}
+                  {currentUser?.name || 'User'}
                 </span>
                 <Badge variant={isOwner ? 'purple' : 'info'} className="text-[9px] px-1.5 py-0">
                   {isOwner ? 'Owner' : 'Staff'}
                 </Badge>
               </div>
               <p className="text-[10px] text-slate-400 truncate">
-                {currentUser.email}
+                {currentUser?.email || ''}
               </p>
             </div>
           </Link>
@@ -304,75 +401,102 @@ export function MainLayout() {
         
         {/* Mobile Top Header (Visible on mobile only) */}
         <header className="lg:hidden sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-slate-200">
-          <div className="px-4 h-14 flex items-center justify-between">
-            <Link to={isOwner ? '/' : '/pos'} className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-xl bg-slate-900 text-white flex items-center justify-center font-bold text-sm shadow-xs">
-                L
+          <div className="px-3.5 h-14 flex items-center justify-between gap-2.5">
+            <Link to={isOwner ? '/' : '/pos'} className="flex items-center gap-2.5 min-w-0 flex-1 group" title="OMESTOCK">
+              <div className="w-8 h-8 rounded-lg bg-black text-white flex items-center justify-center font-black text-base shadow-xs shrink-0 group-active:scale-95 transition-transform">
+                O
               </div>
-              <div className="flex flex-col">
-                <span className="text-base font-black tracking-tight text-slate-900 leading-none">
+              <div className="flex flex-col min-w-0 flex-1">
+                <span className="text-sm font-black tracking-tight text-slate-900 leading-none">
                   OMESTOCK
                 </span>
-                <span className="text-[10px] text-emerald-700 font-semibold truncate max-w-[120px] mt-0.5">
+                <span className="text-[11px] text-emerald-700 font-bold truncate mt-0.5 leading-tight">
                   {tenantName}
                 </span>
               </div>
             </Link>
 
-            <div className="flex items-center gap-2">
+            {/* Logged in User Profile Chip: Toggles little menu */}
+            <div className="relative" ref={userMenuRef}>
               <button
-                onClick={() => setShowTenantMenu(!showTenantMenu)}
-                className="flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors border border-slate-200"
+                type="button"
+                onClick={() => setShowUserMenu(!showUserMenu)}
+                className="flex items-center gap-2 p-1.5 pl-2.5 rounded-xl bg-slate-100 hover:bg-slate-200/80 active:scale-95 transition-all border border-slate-200 text-xs shadow-2xs group shrink-0 cursor-pointer"
+                title="Account menu"
               >
-                <Building2 className="w-3 h-3 text-slate-600" />
-                <span className="truncate max-w-[90px]">{tenantName}</span>
-                <ChevronDown className="w-3 h-3 text-slate-400" />
+                <span className="font-extrabold text-slate-900 text-xs">
+                  {currentUser?.name || 'User'}
+                </span>
+                <div className="w-8 h-8 rounded-lg bg-black text-white font-black text-xs flex items-center justify-center shadow-xs group-hover:bg-slate-800 transition-colors shrink-0">
+                  {currentUser?.name ? currentUser.name.charAt(0).toUpperCase() : 'U'}
+                </div>
               </button>
 
-              <button
-                onClick={() => setShowUserMenu(!showUserMenu)}
-                className="w-8 h-8 rounded-xl bg-emerald-100 text-emerald-800 font-extrabold text-xs flex items-center justify-center border border-emerald-200"
-              >
-                {currentUser.avatar}
-              </button>
+              {/* Mobile Little Menu */}
+              {showUserMenu && (
+                <>
+                  <div
+                    className="fixed inset-0 z-40 bg-black/15 backdrop-blur-[0.5px] cursor-pointer"
+                    onClick={() => setShowUserMenu(false)}
+                    onTouchStart={() => setShowUserMenu(false)}
+                  />
+                  <div className="absolute right-0 top-full mt-2 w-64 bg-white rounded-2xl shadow-xl border border-slate-200 z-50 p-2 animate-in fade-in zoom-in-95 duration-100 text-slate-800">
+                    {/* User Info Header */}
+                    <div className="p-3 border-b border-slate-100 bg-slate-50/80 rounded-xl mb-1.5">
+                      <div className="font-black text-slate-900 text-sm truncate">
+                        {currentUser?.name || 'User'}
+                      </div>
+                      <div className="text-[11px] text-slate-500 truncate mb-1.5">
+                        {currentUser?.email || clerkUser?.primaryEmailAddress?.emailAddress || ''}
+                      </div>
+                      <Badge variant={isOwner ? 'purple' : 'info'} className="text-[10px] px-2 py-0.5 font-bold">
+                        {isOwner ? '👑 Organization Owner' : '👤 Salesperson'}
+                      </Badge>
+                    </div>
+
+                    {/* Menu Options */}
+                    <div className="space-y-1">
+                      <Link
+                        to="/profile"
+                        onClick={() => setShowUserMenu(false)}
+                        className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold text-slate-700 hover:bg-slate-100 hover:text-slate-900 transition-colors"
+                      >
+                        <User className="w-4 h-4 text-slate-500" />
+                        <span>Profile & Personal Info</span>
+                      </Link>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowUserMenu(false)
+                          setShowBizSettings(true)
+                        }}
+                        className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold text-slate-700 hover:bg-slate-100 hover:text-slate-900 transition-colors cursor-pointer text-left"
+                      >
+                        <Settings className="w-4 h-4 text-slate-500" />
+                        <span>Workspace Settings</span>
+                      </button>
+                    </div>
+
+                    {/* Sign Out Action */}
+                    <div className="pt-1.5 mt-1.5 border-t border-slate-100">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowUserMenu(false)
+                          signOutUser()
+                        }}
+                        className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+                      >
+                        <LogOut className="w-4 h-4 text-rose-500" />
+                        <span>Sign Out</span>
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
           </div>
-
-          {/* Mobile User Dropdown */}
-          {showUserMenu && (
-            <div className="px-4 py-3 bg-white border-b border-slate-200 animate-in fade-in space-y-2">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-bold text-slate-900">{currentUser.name}</p>
-                  <p className="text-[10px] text-slate-400">{currentUser.email}</p>
-                </div>
-                <Badge variant={isOwner ? 'purple' : 'info'} className="text-[10px]">
-                  {isOwner ? 'Owner' : 'Staff'}
-                </Badge>
-              </div>
-
-              <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
-                <Link
-                  to="/profile"
-                  onClick={() => setShowUserMenu(false)}
-                  className="flex-1 text-center py-1.5 px-3 bg-slate-50 hover:bg-slate-100 text-xs font-bold text-slate-700 rounded-xl border border-slate-200"
-                >
-                  My Profile
-                </Link>
-
-                <button
-                  onClick={() => {
-                    setShowUserMenu(false)
-                    signOutUser()
-                  }}
-                  className="flex-1 text-center py-1.5 px-3 bg-rose-50 hover:bg-rose-100 text-xs font-bold text-rose-700 rounded-xl border border-rose-200 flex items-center justify-center gap-1 cursor-pointer"
-                >
-                  <LogOut className="w-3.5 h-3.5" />
-                  <span>Sign Out</span>
-                </button>
-              </div>
-            </div>
-          )}
         </header>
 
         {/* Desktop Header Bar (Clean, spacious status bar) */}
@@ -391,15 +515,80 @@ export function MainLayout() {
               Live Synced
             </span>
 
-            <Link
-              to="/profile"
-              className="flex items-center gap-2 p-1.5 pr-3 rounded-xl hover:bg-slate-100 transition-colors border border-slate-200 text-xs font-bold text-slate-700"
-            >
-              <div className="w-6 h-6 rounded-lg bg-emerald-100 text-emerald-800 flex items-center justify-center font-extrabold text-[10px]">
-                {currentUser.avatar}
-              </div>
-              <span>{currentUser.name}</span>
-            </Link>
+            <div className="relative" ref={desktopUserMenuRef}>
+              <button
+                type="button"
+                onClick={() => setShowUserMenu(!showUserMenu)}
+                className="flex items-center gap-2 p-1.5 pr-3 rounded-xl hover:bg-slate-100 transition-colors border border-slate-200 text-xs font-bold text-slate-700 cursor-pointer"
+              >
+                <div className="w-6 h-6 rounded-lg bg-black text-white flex items-center justify-center font-extrabold text-[10px]">
+                  {currentUser?.avatar || currentUser?.name?.charAt(0)?.toUpperCase() || 'U'}
+                </div>
+                <span>{currentUser?.name || 'User'}</span>
+                <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+              </button>
+
+              {/* Desktop Little Menu */}
+              {showUserMenu && (
+                <>
+                  <div
+                    className="fixed inset-0 z-40 cursor-pointer"
+                    onClick={() => setShowUserMenu(false)}
+                    onTouchStart={() => setShowUserMenu(false)}
+                  />
+                  <div className="absolute right-0 top-full mt-2 w-64 bg-white rounded-2xl shadow-xl border border-slate-200 z-50 p-2 animate-in fade-in zoom-in-95 duration-100 text-slate-800">
+                    <div className="p-3 border-b border-slate-100 bg-slate-50/80 rounded-xl mb-1.5">
+                      <div className="font-black text-slate-900 text-sm truncate">
+                        {currentUser?.name || 'User'}
+                      </div>
+                      <div className="text-[11px] text-slate-500 truncate mb-1.5">
+                        {currentUser?.email || clerkUser?.primaryEmailAddress?.emailAddress || ''}
+                      </div>
+                      <Badge variant={isOwner ? 'purple' : 'info'} className="text-[10px] px-2 py-0.5 font-bold">
+                        {isOwner ? '👑 Organization Owner' : '👤 Salesperson'}
+                      </Badge>
+                    </div>
+
+                    <div className="space-y-1">
+                      <Link
+                        to="/profile"
+                        onClick={() => setShowUserMenu(false)}
+                        className="flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-bold text-slate-700 hover:bg-slate-100 hover:text-slate-900 transition-colors"
+                      >
+                        <User className="w-4 h-4 text-slate-500" />
+                        <span>Profile & Personal Info</span>
+                      </Link>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowUserMenu(false)
+                          setShowBizSettings(true)
+                        }}
+                        className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-bold text-slate-700 hover:bg-slate-100 hover:text-slate-900 transition-colors cursor-pointer text-left"
+                      >
+                        <Settings className="w-4 h-4 text-slate-500" />
+                        <span>Workspace Settings</span>
+                      </button>
+                    </div>
+
+                    <div className="pt-1.5 mt-1.5 border-t border-slate-100">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowUserMenu(false)
+                          signOutUser()
+                        }}
+                        className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-bold text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+                      >
+                        <LogOut className="w-4 h-4 text-rose-500" />
+                        <span>Sign Out</span>
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </header>
 
@@ -445,7 +634,7 @@ export function MainLayout() {
         <NavLink
           to="/inventory"
           className={({ isActive }) =>
-            `flex flex-col items-center justify-center w-16 py-1 rounded-xl text-[10px] font-bold transition-all touch-manipulation active:scale-95 ${
+            `flex flex-col items-center justify-center w-14 sm:w-16 py-1 rounded-xl text-[10px] font-bold transition-all touch-manipulation active:scale-95 ${
               isActive ? 'text-emerald-700 bg-emerald-50' : 'text-slate-500 hover:text-slate-900'
             }`
           }
@@ -454,12 +643,32 @@ export function MainLayout() {
           <span>Stock</span>
         </NavLink>
 
-        {/* 3. Staff Control */}
+        {/* 3. Unpaid Sales */}
+        <NavLink
+          to="/unpaid-sales"
+          className={({ isActive }) =>
+            `relative flex flex-col items-center justify-center w-14 sm:w-16 py-1 rounded-xl text-[10px] font-bold transition-all touch-manipulation active:scale-95 ${
+              isActive ? 'text-emerald-700 bg-emerald-50' : 'text-slate-500 hover:text-slate-900'
+            }`
+          }
+        >
+          <div className="relative">
+            <ClockAlert className="w-5 h-5 mb-0.5" />
+            {unpaidCount > 0 && (
+              <span className="absolute -top-1 -right-2 px-1 min-w-[14px] h-[14px] text-[8px] font-black text-white bg-amber-500 rounded-full flex items-center justify-center leading-none">
+                {unpaidCount}
+              </span>
+            )}
+          </div>
+          <span>Unpaid</span>
+        </NavLink>
+
+        {/* 4. Staff Control */}
         {isOwner && (
           <NavLink
             to="/staff"
             className={({ isActive }) =>
-              `flex flex-col items-center justify-center w-16 py-1 rounded-xl text-[10px] font-bold transition-all touch-manipulation active:scale-95 ${
+              `flex flex-col items-center justify-center w-14 sm:w-16 py-1 rounded-xl text-[10px] font-bold transition-all touch-manipulation active:scale-95 ${
                 isActive ? 'text-emerald-700 bg-emerald-50' : 'text-slate-500 hover:text-slate-900'
               }`
             }
@@ -472,7 +681,7 @@ export function MainLayout() {
         {/* 5. More Actions */}
         <button
           onClick={() => setShowMobileMoreSheet(true)}
-          className={`flex flex-col items-center justify-center w-16 py-1 rounded-xl text-[10px] font-bold transition-all touch-manipulation active:scale-95 ${
+          className={`flex flex-col items-center justify-center w-14 sm:w-16 py-1 rounded-xl text-[10px] font-bold transition-all touch-manipulation active:scale-95 ${
             showMobileMoreSheet ? 'text-emerald-700 bg-emerald-50' : 'text-slate-500 hover:text-slate-900'
           }`}
         >
@@ -483,8 +692,18 @@ export function MainLayout() {
 
       {/* ─── Mobile More Sheet ─── */}
       {showMobileMoreSheet && (
-        <div className="lg:hidden fixed inset-0 z-50 flex items-end justify-center bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200">
-          <div className="bg-white w-full rounded-t-3xl max-h-[85vh] overflow-y-auto shadow-2xl p-4 pb-8 animate-in slide-in-from-bottom duration-200">
+        <div
+          className="lg:hidden fixed inset-0 z-50 flex items-end justify-center bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200 cursor-pointer"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setShowMobileMoreSheet(false)
+            }
+          }}
+        >
+          <div
+            className="bg-white w-full rounded-t-3xl max-h-[85vh] overflow-y-auto shadow-2xl p-4 pb-8 animate-in slide-in-from-bottom duration-200 cursor-default"
+            onClick={(e) => e.stopPropagation()}
+          >
             
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
               <div className="flex items-center gap-2.5">
@@ -518,6 +737,28 @@ export function MainLayout() {
                 <div className="flex-1">
                   <div>My Profile & Account</div>
                   <div className="text-[10px] text-slate-500 font-normal">Manage display name, password & PIN</div>
+                </div>
+              </Link>
+
+              {/* Unpaid Sales Link in Mobile More */}
+              <Link
+                to="/unpaid-sales"
+                onClick={() => setShowMobileMoreSheet(false)}
+                className="flex items-center gap-3 p-3.5 rounded-xl bg-slate-50 hover:bg-slate-100 transition-colors touch-manipulation font-bold text-xs text-slate-800"
+              >
+                <div className="w-8 h-8 rounded-lg bg-amber-100 text-amber-800 flex items-center justify-center">
+                  <ClockAlert className="w-4 h-4" />
+                </div>
+                <div className="flex-1">
+                  <div className="flex items-center gap-2">
+                    <span>Unpaid Sales Follow-Up</span>
+                    {unpaidCount > 0 && (
+                      <span className="text-[10px] font-extrabold px-1.5 py-0.2 rounded-full bg-amber-500 text-white">
+                        {unpaidCount}
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-[10px] text-slate-500 font-normal">Customer debt records & credit collections</div>
                 </div>
               </Link>
 
@@ -628,8 +869,18 @@ export function MainLayout() {
 
       {/* Enterprise Settings Modal */}
       {showBizSettings && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200">
-          <div className="bg-white rounded-3xl shadow-xl border border-slate-200 w-full sm:max-w-lg max-w-md p-6 animate-in zoom-in-95 duration-150">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200 cursor-pointer"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setShowBizSettings(false)
+            }
+          }}
+        >
+          <div
+            className="bg-white rounded-3xl shadow-xl border border-slate-200 w-full sm:max-w-lg max-w-md p-6 animate-in zoom-in-95 duration-150 cursor-default"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
               <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
                 <Building2 className="w-4 h-4 text-emerald-600" />
@@ -684,7 +935,7 @@ export function MainLayout() {
               </div>
 
               <p className="text-[11px] text-slate-500 leading-relaxed pt-0.5">
-                Share this 6-digit organization code with your sales team. New sales staff must enter this code when registering so they can bind their account to your organization for your approval.
+                Organization code
               </p>
             </div>
 
@@ -722,6 +973,74 @@ export function MainLayout() {
                 </button>
               </div>
             </form>
+
+            {/* Danger Zone: Reset Data & Delete Account */}
+            <div className="mt-6 pt-5 border-t border-slate-200 space-y-3">
+              <div className="flex items-center gap-1.5 text-xs font-bold text-rose-700">
+                <AlertTriangle className="w-4 h-4 shrink-0" />
+                <span>Danger Zone & Reset Tools</span>
+              </div>
+              <p className="text-[11px] text-slate-500">
+                Clear test data to start fresh, reset your workspace, or permanently delete your user account.
+              </p>
+
+              <div className="space-y-2 pt-1">
+                {/* 1. Clear Inventory & Sales */}
+                <div className="p-3 rounded-2xl bg-amber-50/70 border border-amber-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                  <div>
+                    <h5 className="text-xs font-bold text-amber-950">Clear Inventory & Sales</h5>
+                    <p className="text-[11px] text-amber-800">
+                      Deletes all products, transactions, and resets stock to 0. Keeps your company code.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={clearingData}
+                    onClick={handleClearDatabase}
+                    className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs shrink-0 transition-colors shadow-2xs"
+                  >
+                    {clearingData ? 'Clearing...' : 'Clear All Data'}
+                  </button>
+                </div>
+
+                {/* 2. Reset Workspace to Onboarding */}
+                <div className="p-3 rounded-2xl bg-rose-50/70 border border-rose-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                  <div>
+                    <h5 className="text-xs font-bold text-rose-950">Wipe Workspace & Start Fresh</h5>
+                    <p className="text-[11px] text-rose-800">
+                      Completely wipes company workspace, stores, and data. Returns you to initial setup.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={wipingAccount}
+                    onClick={handleWipeAndReset}
+                    className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shrink-0 transition-colors shadow-2xs"
+                  >
+                    {wipingAccount ? 'Resetting...' : 'Wipe & Start Fresh'}
+                  </button>
+                </div>
+
+                {/* 3. Delete Account */}
+                <div className="p-3 rounded-2xl bg-slate-100 border border-slate-300 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                  <div>
+                    <h5 className="text-xs font-bold text-slate-900">Delete Account</h5>
+                    <p className="text-[11px] text-slate-600">
+                      Permanently delete your profile and Clerk user credentials.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={deletingUser}
+                    onClick={handleDeleteAccount}
+                    className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shrink-0 transition-colors shadow-2xs flex items-center gap-1.5"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>{deletingUser ? 'Deleting...' : 'Delete Account'}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       )}

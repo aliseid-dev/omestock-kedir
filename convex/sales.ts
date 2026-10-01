@@ -19,8 +19,9 @@ export const getSales = query({
 export const recordSale = mutation({
   args: {
     clientId: v.id("clients"),
-    storeId: v.id("stores"),
+    storeId: v.string(),
     storeName: v.optional(v.string()),
+    locationType: v.optional(v.string()), // "store" | "warehouse"
     items: v.array(
       v.object({
         productId: v.string(),
@@ -43,18 +44,18 @@ export const recordSale = mutation({
     commission: v.number(),
   },
   handler: async (ctx, args) => {
-    const store = await ctx.db.get(args.storeId);
-    if (!store) throw new Error("Store not found");
+    const location = await ctx.db.get(args.storeId as any);
+    if (!location) throw new Error("Selling location (store or warehouse) not found");
 
-    const stStock = { ...(store.stock || {}) };
+    const locStock = { ...((location as any).stock || {}) };
 
-    // Deduct stock for each sold item
+    // Deduct stock for each sold item from the selected store or warehouse
     for (const item of args.items) {
-      const currentQty = stStock[item.productId] || 0;
-      stStock[item.productId] = currentQty - item.quantity;
+      const currentQty = locStock[item.productId] || 0;
+      locStock[item.productId] = currentQty - item.quantity;
     }
 
-    await ctx.db.patch(args.storeId, { stock: stStock });
+    await ctx.db.patch(args.storeId as any, { stock: locStock });
 
     const now = new Date().toISOString();
     const invoiceNumber = `INV-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;

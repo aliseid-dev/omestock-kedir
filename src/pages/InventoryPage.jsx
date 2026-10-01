@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react'
+import React, { useState, useMemo, useRef, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
   Boxes,
@@ -8,6 +8,9 @@ import {
   Store,
   AlertTriangle,
   Plus,
+  Minus,
+  ArrowDown,
+  ChevronDown,
   DollarSign,
   Building,
   CreditCard,
@@ -29,16 +32,183 @@ import {
   ChevronRight,
   Landmark,
   Smartphone,
-  Banknote
+  Banknote,
+  Table as TableIcon,
+  LayoutGrid
 } from 'lucide-react'
 import { useTenant } from '../context/TenantContext'
 import { useAuth } from '../context/AuthContext'
+import { useToast } from '../context/ToastContext'
 import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'
 import { Badge } from '../components/ui/Badge'
 import { Modal } from '../components/ui/Modal'
 import { formatCurrency } from '../lib/utils'
 import { ETHIOPIAN_PAYMENT_PROVIDERS, DEFAULT_BANK } from '../lib/ethiopian-banks'
+
+function SearchableProductSelect({
+  value,
+  onChange,
+  products = [],
+  warehouseStock = null,
+  stockLabel = 'in Wh',
+  showStock = true,
+  placeholder = "Select or search product...",
+  compact = false,
+  showCost = false,
+  className = ""
+}) {
+  const [isOpen, setIsOpen] = useState(false)
+  const [search, setSearch] = useState('')
+  const dropdownRef = useRef(null)
+
+  const selectedProduct = products.find(p => p.id === value)
+
+  const filtered = useMemo(() => {
+    if (!search.trim()) return products
+    const q = search.toLowerCase().trim()
+    return products.filter(p => 
+      p.name?.toLowerCase().includes(q) || 
+      p.code?.toLowerCase().includes(q) ||
+      p.category?.toLowerCase().includes(q)
+    )
+  }, [products, search])
+
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+        setIsOpen(false)
+      }
+    }
+    if (isOpen) {
+      document.addEventListener('mousedown', handleClickOutside)
+      document.addEventListener('touchstart', handleClickOutside)
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+      document.removeEventListener('touchstart', handleClickOutside)
+    }
+  }, [isOpen])
+
+  const hasStockMap = showStock && warehouseStock !== null && typeof warehouseStock === 'object'
+
+  return (
+    <div className={`relative ${className}`} ref={dropdownRef}>
+      {/* Trigger Button */}
+      <button
+        type="button"
+        onClick={() => {
+          setIsOpen(!isOpen)
+          setSearch('')
+        }}
+        className={`w-full bg-white border border-slate-200 hover:border-slate-300 rounded-xl text-left flex items-center justify-between gap-2 transition-all cursor-pointer shadow-2xs ${
+          compact ? 'p-2 min-h-[38px] text-xs' : 'p-2.5 min-h-[44px]'
+        }`}
+      >
+        {selectedProduct ? (
+          <div className="min-w-0 flex-1 flex items-center justify-between gap-2">
+            <div className="truncate">
+              <span className={`font-bold text-slate-900 truncate block ${compact ? 'text-xs' : 'text-xs'}`}>
+                {selectedProduct.name}
+              </span>
+              <span className="text-[10px] text-slate-400 font-medium">
+                {selectedProduct.code ? `SKU: ${selectedProduct.code} • ` : ''}
+                {showCost && selectedProduct.costPrice ? `Cost: ${formatCurrency(selectedProduct.costPrice)} • ` : ''}
+                {selectedProduct.category || 'General'}
+              </span>
+            </div>
+            {hasStockMap && (
+              <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full border shrink-0 ${
+                (warehouseStock[selectedProduct.id] || 0) > 0
+                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                  : 'bg-rose-50 text-rose-600 border-rose-200'
+              }`}>
+                {warehouseStock[selectedProduct.id] || 0} {stockLabel}
+              </span>
+            )}
+          </div>
+        ) : (
+          <span className="text-slate-400 text-xs font-medium">{placeholder}</span>
+        )}
+        <ChevronDown className={`w-4 h-4 text-slate-400 shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+      </button>
+
+      {/* Dropdown Menu */}
+      {isOpen && (
+        <div className="absolute left-0 right-0 top-full mt-1.5 bg-white border border-slate-200 rounded-2xl shadow-xl z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-100">
+          {/* Search Input */}
+          <div className="p-2 border-b border-slate-100 bg-slate-50/90 sticky top-0 z-10">
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                autoFocus
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Type to search product name or SKU..."
+                className="w-full pl-8 pr-7 py-2 bg-white border border-slate-200 rounded-lg text-xs font-medium focus:outline-none focus:ring-2 focus:ring-slate-900/10"
+              />
+              {search && (
+                <button
+                  type="button"
+                  onClick={() => setSearch('')}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-slate-400 hover:text-slate-600 cursor-pointer"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Product Items List */}
+          <div className="max-h-56 overflow-y-auto divide-y divide-slate-100">
+            {filtered.length === 0 ? (
+              <div className="p-4 text-center text-xs text-slate-400">
+                No matching products found
+              </div>
+            ) : (
+              filtered.map(p => {
+                const stock = hasStockMap ? (warehouseStock[p.id] || 0) : null
+                const isSelected = p.id === value
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => {
+                      onChange(p.id, p)
+                      setIsOpen(false)
+                    }}
+                    className={`w-full text-left p-2.5 hover:bg-slate-50 flex items-center justify-between gap-2 transition-colors cursor-pointer ${
+                      isSelected ? 'bg-slate-100/70 font-bold' : ''
+                    }`}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="text-xs font-bold text-slate-900 truncate">{p.name}</div>
+                      <div className="text-[10px] text-slate-400 flex items-center gap-1.5">
+                        {p.code && <span className="font-mono bg-slate-100 px-1 py-0.2 rounded font-bold text-slate-600">{p.code}</span>}
+                        {showCost && p.costPrice && <span>Cost: {formatCurrency(p.costPrice)}</span>}
+                        <span>{p.category || 'General'}</span>
+                      </div>
+                    </div>
+                    {hasStockMap && (
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border shrink-0 ${
+                        stock > 0
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                          : 'bg-slate-100 text-slate-400 border-slate-200'
+                      }`}>
+                        {stock} {stockLabel}
+                      </span>
+                    )}
+                  </button>
+                )
+              })
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
 
 export function InventoryPage() {
   const {
@@ -51,10 +221,33 @@ export function InventoryPage() {
     createProduct,
     overrideStock,
     updateProduct,
+    seedSampleInventory,
     addStore,
     deleteStore
   } = useTenant()
   const { currentUser, isOwner } = useAuth()
+  const { toast } = useToast()
+
+  const [stockViewMode, setStockViewMode] = useState('table') // 'table' | 'cards'
+  const [isSeeding, setIsSeeding] = useState(false)
+
+  const handleSeedSampleData = async () => {
+    if (!confirm('Load 15 sample items from Kaya Yasmin Auto Parts into warehouse and store?')) return
+    setIsSeeding(true)
+    try {
+      const res = await seedSampleInventory()
+      if (res) {
+        toast.success('Sample Data Loaded', 'Successfully loaded 15 Auto Parts items into warehouse and store!')
+      } else {
+        toast.info('Sample Data', 'Sample auto parts loaded.')
+      }
+    } catch (err) {
+      console.error(err)
+      toast.error('Seeding Error', 'Failed to load sample inventory.')
+    } finally {
+      setIsSeeding(false)
+    }
+  }
 
   // Location URL Router & State (Hub vs Dedicated Location)
   const [searchParams, setSearchParams] = useSearchParams()
@@ -90,7 +283,6 @@ export function InventoryPage() {
   }, [products, activeLocation, globalSearchQuery, selectedCategory])
 
   // Modals
-  const [isWarehouseInboundModalOpen, setIsWarehouseInboundModalOpen] = useState(false)
   const [isTransferModalOpen, setIsTransferModalOpen] = useState(false)
   const [isPurchaseModalOpen, setIsPurchaseModalOpen] = useState(false)
   const [isOverrideModalOpen, setIsOverrideModalOpen] = useState(false)
@@ -109,6 +301,7 @@ export function InventoryPage() {
   })
 
   const [isWarehouseDirectPurchaseOpen, setIsWarehouseDirectPurchaseOpen] = useState(false)
+  const [isWarehousePurchaseNewProduct, setIsWarehousePurchaseNewProduct] = useState(false)
   const [warehouseDirectPurchaseForm, setWarehouseDirectPurchaseForm] = useState({
     productId: '',
     quantity: '10',
@@ -118,6 +311,9 @@ export function InventoryPage() {
     bankReference: '',
     telebirrReference: '',
     supplierName: '',
+    newProductName: '',
+    newProductCategory: 'General',
+    newProductSellingPrice: '30',
   })
 
   const [isWarehouseTransferOpen, setIsWarehouseTransferOpen] = useState(false)
@@ -140,6 +336,7 @@ export function InventoryPage() {
   })
 
   const [isStoreDirectPurchaseOpen, setIsStoreDirectPurchaseOpen] = useState(false)
+  const [isStorePurchaseNewProduct, setIsStorePurchaseNewProduct] = useState(false)
   const [storeDirectPurchaseForm, setStoreDirectPurchaseForm] = useState({
     productId: '',
     quantity: '10',
@@ -149,6 +346,9 @@ export function InventoryPage() {
     bankReference: '',
     telebirrReference: '',
     supplierName: '',
+    newProductName: '',
+    newProductCategory: 'General',
+    newProductSellingPrice: '30',
   })
 
   const [isStoreTransferOpen, setIsStoreTransferOpen] = useState(false)
@@ -162,117 +362,6 @@ export function InventoryPage() {
   // Pricing Modal Search & State
   const [pricingSearchQuery, setPricingSearchQuery] = useState('')
   const [pricingSavedToast, setPricingSavedToast] = useState(false)
-
-  // Transfer Modal Search
-  const [transferProductSearch, setTransferProductSearch] = useState('')
-
-  // Purchase Modal Search
-  const [purchaseProductSearch, setPurchaseProductSearch] = useState('')
-
-  // Warehouse Inbound Form & Search
-  const [inboundProductSearch, setInboundProductSearch] = useState('')
-  const [isInboundCreatingNewProduct, setIsInboundCreatingNewProduct] = useState(false)
-  const [warehouseInboundForm, setWarehouseInboundForm] = useState({
-    warehouseId: warehouses[0]?.id || '',
-    productId: products[0]?.id || '',
-    quantity: '50',
-    costPerUnit: products[0]?.costPrice || '20',
-    paymentMethod: 'Cash', // Cash | Banking | Credit
-    bankProvider: DEFAULT_BANK,
-    supplierName: '',
-    // New product fields
-    newProductName: '',
-    newProductCategory: 'Groceries',
-    newProductSellingPrice: '30',
-    newProductCostPrice: '20',
-    newProductCommissionRate: '5',
-    newProductMinThreshold: '10',
-  })
-
-  // Bulk Warehouse Inbound State
-  const [isInboundBulkMode, setIsInboundBulkMode] = useState(false)
-  const [bulkInboundItems, setBulkInboundItems] = useState([
-    {
-      id: 'bulk-inbound-1',
-      isNewProduct: false,
-      productId: products[0]?.id || '',
-      quantity: '50',
-      costPerUnit: products[0]?.costPrice || '20',
-      newProductName: '',
-      newProductCategory: 'General',
-      newProductSellingPrice: '30',
-    }
-  ])
-
-  // Bulk Inbound Row Handlers
-  const handleAddBulkInboundRow = (isNew = false) => {
-    const usedIds = new Set(bulkInboundItems.filter(it => !it.isNewProduct).map(it => it.productId))
-    const nextProd = products.find(p => !usedIds.has(p.id)) || products[0]
-    setBulkInboundItems(prev => [
-      ...prev,
-      {
-        id: `bulk-inbound-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        isNewProduct: isNew,
-        productId: nextProd?.id || '',
-        quantity: '20',
-        costPerUnit: isNew ? '20' : (nextProd?.costPrice || '10'),
-        newProductName: '',
-        newProductCategory: 'General',
-        newProductSellingPrice: '30',
-      }
-    ])
-  }
-
-  const handleRemoveBulkInboundRow = (rowId) => {
-    if (bulkInboundItems.length <= 1) return
-    setBulkInboundItems(prev => prev.filter(r => r.id !== rowId))
-  }
-
-  const handleUpdateBulkInboundRow = (rowId, field, val) => {
-    setBulkInboundItems(prev => prev.map(r => {
-      if (r.id !== rowId) return r
-      const updated = { ...r, [field]: val }
-      if (field === 'productId') {
-        const prod = products.find(p => p.id === val)
-        if (prod) updated.costPerUnit = prod.costPrice || '0'
-      }
-      return updated
-    }))
-  }
-
-  // Stock Transfer Items State (Defaults to 1 item)
-  const [transferItems, setTransferItems] = useState([
-    {
-      id: 'trans-1',
-      productId: products[0]?.id || '',
-      quantity: '5'
-    }
-  ])
-
-  const handleAddTransferItem = () => {
-    const usedIds = new Set(transferItems.map(it => it.productId))
-    const nextProd = products.find(p => !usedIds.has(p.id)) || products[0]
-    setTransferItems(prev => [
-      ...prev,
-      {
-        id: `trans-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        productId: nextProd?.id || '',
-        quantity: '5'
-      }
-    ])
-  }
-
-  const handleRemoveTransferItem = (rowId) => {
-    if (transferItems.length <= 1) return
-    setTransferItems(prev => prev.filter(r => r.id !== rowId))
-  }
-
-  const handleUpdateTransferItem = (rowId, field, val) => {
-    setTransferItems(prev => prev.map(r => {
-      if (r.id !== rowId) return r
-      return { ...r, [field]: val }
-    }))
-  }
 
   // Direct Store Purchase State & Handlers
   const [isPurchaseCreatingNewProduct, setIsPurchaseCreatingNewProduct] = useState(false)
@@ -421,174 +510,55 @@ export function InventoryPage() {
   const commissionRateNum = parseFloat(productPricingForm.defaultCommissionRate) || 0
   const commissionPerUnit = sellingNum * (commissionRateNum / 100)
 
-  // Submit Warehouse Inbound Restock
-  const handleWarehouseInboundSubmit = async (e) => {
-    e.preventDefault()
-    if (!isOwner) return
-    let bankProviderName = null
-    if (warehouseInboundForm.paymentMethod === 'Banking') {
-      const bankObj = ETHIOPIAN_PAYMENT_PROVIDERS.find(b => b.id === warehouseInboundForm.bankProvider)
-      bankProviderName = bankObj ? bankObj.name : warehouseInboundForm.bankProvider
-    }
-
-    // ─── Bulk Inbound Submission ───
-    if (isInboundBulkMode) {
-      const validItems = []
-      for (const it of bulkInboundItems) {
-        const qty = parseInt(it.quantity, 10) || 0
-        if (qty <= 0) continue
-
-        if (it.isNewProduct) {
-          if (!it.newProductName || !it.newProductName.trim()) {
-            alert('Please enter a product name for all new items in the inbound manifest.')
-            return
-          }
-          const created = await createProduct({
-            name: it.newProductName.trim(),
-            category: it.newProductCategory?.trim() || 'General',
-            sellingPrice: it.newProductSellingPrice || '30',
-            costPrice: it.costPerUnit || '20',
-            defaultCommissionRate: 5,
-            minStockThreshold: 10,
-          }, currentUser)
-          if (!created) {
-            alert(`Failed to create product "${it.newProductName}". Please try again.`)
-            return
-          }
-          validItems.push({
-            productId: created.id,
-            productName: created.name,
-            quantity: qty,
-            costPerUnit: parseFloat(it.costPerUnit) || 0,
-          })
-        } else if (it.productId) {
-          const prod = products.find(p => p.id === it.productId)
-          validItems.push({
-            productId: it.productId,
-            productName: prod?.name || it.productId,
-            quantity: qty,
-            costPerUnit: parseFloat(it.costPerUnit) || 0,
-          })
-        }
-      }
-
-      if (validItems.length === 0) {
-        alert('Please specify at least one valid product with quantity > 0')
-        return
-      }
-
-      await recordWarehouseInbound({
-        warehouseId: warehouseInboundForm.warehouseId,
-        items: validItems,
-        paymentMethod: warehouseInboundForm.paymentMethod,
-        bankProvider: bankProviderName,
-        supplierName: warehouseInboundForm.supplierName,
-      }, currentUser)
-
-      setIsWarehouseInboundModalOpen(false)
-      setBulkInboundItems([
-        {
-          id: `bulk-inbound-${Date.now()}`,
-          isNewProduct: false,
-          productId: products[0]?.id || '',
-          quantity: '50',
-          costPerUnit: products[0]?.costPrice || '20',
-          newProductName: '',
-          newProductCategory: 'General',
-          newProductSellingPrice: '30',
-        }
-      ])
-      return
-    }
-
-    let targetProductId = warehouseInboundForm.productId
-
-    // If creating a brand new product during warehouse intake
-    if (isInboundCreatingNewProduct) {
-      if (!warehouseInboundForm.newProductName.trim()) {
-        alert('Please enter a product name')
-        return
-      }
-      const created = await createProduct({
-        name: warehouseInboundForm.newProductName.trim(),
-        category: warehouseInboundForm.newProductCategory.trim(),
-        sellingPrice: warehouseInboundForm.newProductSellingPrice,
-        costPrice: warehouseInboundForm.newProductCostPrice,
-        defaultCommissionRate: warehouseInboundForm.newProductCommissionRate,
-        minStockThreshold: warehouseInboundForm.newProductMinThreshold,
-      }, currentUser)
-      if (!created) {
-        alert('Failed to create product. Please try again.')
-        return
-      }
-      targetProductId = created.id
-    }
-
-    await recordWarehouseInbound({
-      warehouseId: warehouseInboundForm.warehouseId,
-      productId: targetProductId,
-      quantity: warehouseInboundForm.quantity,
-      costPerUnit: isInboundCreatingNewProduct ? warehouseInboundForm.newProductCostPrice : warehouseInboundForm.costPerUnit,
-      paymentMethod: warehouseInboundForm.paymentMethod,
-      bankProvider: bankProviderName,
-      supplierName: warehouseInboundForm.supplierName,
-    }, currentUser)
-
-    setIsWarehouseInboundModalOpen(false)
-    setIsInboundCreatingNewProduct(false)
-    setWarehouseInboundForm(prev => ({
-      ...prev,
-      quantity: '50',
-      supplierName: '',
-      newProductName: '',
-    }))
-  }
-
-  // Submit Stock Transfer
+  // Submit Stock Transfer (One product at a time)
   const handleTransferSubmit = async (e) => {
     e.preventDefault()
     const wh = warehouses.find(w => w.id === transferForm.fromWarehouseId)
-    const validItems = transferItems
-      .filter(it => it.productId && parseInt(it.quantity, 10) > 0)
-      .map(it => {
-        const prod = products.find(p => p.id === it.productId)
-        return {
-          productId: it.productId,
-          productName: prod?.name || it.productId,
-          quantity: parseInt(it.quantity, 10),
-        }
-      })
+    const qty = parseInt(transferForm.quantity, 10) || 0
 
-    if (validItems.length === 0) {
-      alert('Please add at least one item with quantity greater than 0.')
+    if (!transferForm.productId) {
+      toast.warning('Product Required', 'Please select a product to transfer.')
       return
     }
 
-    for (const item of validItems) {
-      const available = wh?.stock[item.productId] || 0
-      if (item.quantity > available) {
-        alert(`Transfer quantity for "${item.productName}" (${item.quantity}) exceeds available warehouse stock (${available}).`)
-        return
-      }
+    if (qty <= 0) {
+      toast.warning('Invalid Quantity', 'Please enter a valid transfer quantity greater than 0.')
+      return
     }
 
+    const available = wh?.stock?.[transferForm.productId] || 0
+    if (qty > available) {
+      const prod = products.find(p => p.id === transferForm.productId)
+      toast.error('Stock Exceeded', `Transfer quantity (${qty}) exceeds available warehouse stock (${available}) for "${prod?.name || 'Product'}".`)
+      return
+    }
+
+    const prod = products.find(p => p.id === transferForm.productId)
+    const targetStore = stores.find(s => s.id === transferForm.toStoreId)
     const success = await transferStock({
       fromWarehouseId: transferForm.fromWarehouseId,
       toStoreId: transferForm.toStoreId,
-      items: validItems,
+      items: [
+        {
+          productId: transferForm.productId,
+          productName: prod?.name || transferForm.productId,
+          quantity: qty,
+        }
+      ],
     }, currentUser)
 
     if (success) {
       setIsTransferModalOpen(false)
-      setTransferItems([
-        {
-          id: `trans-${Date.now()}`,
-          productId: products[0]?.id || '',
-          quantity: '5'
-        }
-      ])
+      toast.success(
+        'Stock Transferred',
+        `Transferred ${qty} unit${qty > 1 ? 's' : ''} of "${prod?.name || 'Product'}" to ${targetStore?.name || 'Store'}.`
+      )
+      setTransferForm(prev => ({
+        ...prev,
+        quantity: '5'
+      }))
     } else {
-      alert('Could not complete transfer. Please verify warehouse stock.')
+      toast.error('Transfer Failed', 'Could not complete transfer. Please verify warehouse stock.')
     }
   }
 
@@ -599,7 +569,7 @@ export function InventoryPage() {
     if (!activeLocation) return
 
     if (!warehouseAddProductForm.name.trim()) {
-      alert('Please enter a product name')
+      toast.warning('Product Name Required', 'Please enter a product name.')
       return
     }
 
@@ -615,6 +585,7 @@ export function InventoryPage() {
 
     if (created) {
       setIsWarehouseAddProductOpen(false)
+      toast.success('Product Added', `"${created.name}" added to ${activeLocation.name}.`)
       setWarehouseAddProductForm({
         name: '',
         category: 'General',
@@ -624,176 +595,165 @@ export function InventoryPage() {
         minStockThreshold: '5',
       })
     } else {
-      alert('Failed to add product to warehouse.')
+      toast.error('Creation Failed', 'Failed to add product to warehouse.')
     }
   }
 
-  // ─── Dedicated Warehouse Page Multi-Item Handlers ─────────────────────────
-  const handleAddWarehousePurchaseRow = () => {
-    const usedIds = new Set(warehousePurchaseItems.map(it => it.productId))
-    const nextProd = products.find(p => !usedIds.has(p.id)) || products[0]
-    setWarehousePurchaseItems(prev => [
-      ...prev,
-      {
-        id: `wh-p-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        productId: nextProd?.id || '',
-        quantity: '10',
-        costPerUnit: nextProd?.costPrice || '20',
-      }
-    ])
-  }
-
-  const handleRemoveWarehousePurchaseRow = (rowId) => {
-    if (warehousePurchaseItems.length <= 1) return
-    setWarehousePurchaseItems(prev => prev.filter(r => r.id !== rowId))
-  }
-
-  const handleUpdateWarehousePurchaseRow = (rowId, field, val) => {
-    setWarehousePurchaseItems(prev => prev.map(r => {
-      if (r.id !== rowId) return r
-      const updated = { ...r, [field]: val }
-      if (field === 'productId') {
-        const prod = products.find(p => p.id === val)
-        if (prod) updated.costPerUnit = prod.costPrice || '20'
-      }
-      return updated
-    }))
-  }
-
+  // ─── Dedicated Warehouse Page Single-Item Handlers ─────────────────────────
   const handleWarehouseDirectPurchaseSubmit = async (e) => {
     e.preventDefault()
     if (!activeLocation) return
 
-    const validItems = warehousePurchaseItems
-      .filter(it => it.productId && parseInt(it.quantity, 10) > 0)
-      .map(it => {
-        const prod = products.find(p => p.id === it.productId)
-        return {
-          productId: it.productId,
-          productName: prod?.name || it.productId,
-          quantity: parseInt(it.quantity, 10),
-          costPerUnit: parseFloat(it.costPerUnit) || 0,
-        }
-      })
+    const {
+      productId,
+      quantity,
+      costPerUnit,
+      paymentMethod,
+      bankProvider,
+      bankReference,
+      telebirrReference,
+      supplierName,
+      newProductName,
+      newProductCategory,
+      newProductSellingPrice,
+    } = warehouseDirectPurchaseForm
+    const qty = parseInt(quantity, 10)
+    const cost = parseFloat(costPerUnit) || 0
 
-    if (validItems.length === 0) {
-      alert('Please add at least one product with quantity > 0')
+    if (isNaN(qty) || qty <= 0) {
+      toast.warning('Invalid Quantity', 'Please enter a valid quantity (> 0).')
       return
     }
 
-    let bankProviderName = undefined
-    if (warehouseDirectPurchaseForm.paymentMethod === 'Banking') {
-      const bankObj = ETHIOPIAN_PAYMENT_PROVIDERS.find(b => b.id === warehouseDirectPurchaseForm.bankProvider)
-      bankProviderName = bankObj ? bankObj.name : warehouseDirectPurchaseForm.bankProvider
+    let targetProductId = productId
+    let targetProductName = ''
+
+    if (isWarehousePurchaseNewProduct) {
+      if (!newProductName || !newProductName.trim()) {
+        toast.warning('Product Name Required', 'Please enter a name for the new product.')
+        return
+      }
+      const created = await createProduct({
+        name: newProductName.trim(),
+        category: newProductCategory?.trim() || 'General',
+        sellingPrice: newProductSellingPrice || '30',
+        costPrice: costPerUnit || '20',
+        defaultCommissionRate: 5,
+        minStockThreshold: 5,
+      }, currentUser)
+      if (!created) {
+        toast.error('Creation Failed', 'Failed to create new product. Please try again.')
+        return
+      }
+      targetProductId = created.id
+      targetProductName = created.name
+    } else {
+      if (!productId) {
+        toast.warning('Product Required', 'Please select a product.')
+        return
+      }
+      const prod = products.find(p => p.id === productId)
+      targetProductName = prod?.name || 'Product'
     }
 
-    const ref = warehouseDirectPurchaseForm.paymentMethod === 'Banking'
-      ? warehouseDirectPurchaseForm.bankReference
-      : warehouseDirectPurchaseForm.paymentMethod === 'Telebirr'
-      ? warehouseDirectPurchaseForm.telebirrReference
+    let bankProviderName = undefined
+    if (paymentMethod === 'Banking') {
+      const bankObj = ETHIOPIAN_PAYMENT_PROVIDERS.find(b => b.id === bankProvider)
+      bankProviderName = bankObj ? bankObj.name : bankProvider
+    }
+
+    const ref = paymentMethod === 'Banking'
+      ? bankReference
+      : paymentMethod === 'Telebirr'
+      ? telebirrReference
       : ''
 
-    const supplierStr = warehouseDirectPurchaseForm.supplierName
-      ? `${warehouseDirectPurchaseForm.supplierName}${ref ? ` (Ref: ${ref})` : ''}`
+    const supplierStr = supplierName
+      ? `${supplierName}${ref ? ` (Ref: ${ref})` : ''}`
       : (ref ? `Ref: ${ref}` : undefined)
 
     const success = await recordWarehouseInbound({
       warehouseId: activeLocation.id,
-      items: validItems,
-      paymentMethod: warehouseDirectPurchaseForm.paymentMethod,
+      items: [{
+        productId: targetProductId,
+        productName: targetProductName,
+        quantity: qty,
+        costPerUnit: cost,
+      }],
+      paymentMethod,
       bankProvider: bankProviderName,
       supplierName: supplierStr,
     })
 
     if (success) {
       setIsWarehouseDirectPurchaseOpen(false)
-      setWarehousePurchaseItems([
-        { id: `wh-p-${Date.now()}`, productId: products[0]?.id || '', quantity: '10', costPerUnit: products[0]?.costPrice || '20' }
-      ])
+      setIsWarehousePurchaseNewProduct(false)
+      toast.success(
+        isWarehousePurchaseNewProduct ? 'New Product Added & Stocked' : 'Purchase Recorded',
+        `Added ${qty} units of "${targetProductName}" to ${activeLocation.name}.`
+      )
       setWarehouseDirectPurchaseForm(prev => ({
         ...prev,
+        productId: '',
+        quantity: '10',
         supplierName: '',
         bankReference: '',
         telebirrReference: '',
+        newProductName: '',
+        newProductCategory: 'General',
+        newProductSellingPrice: '30',
       }))
     } else {
-      alert('Could not record direct warehouse purchase.')
+      toast.error('Purchase Failed', 'Could not record direct warehouse purchase.')
     }
-  }
-
-  const handleAddWarehouseTransferRow = () => {
-    const stockedProds = products.filter(p => (activeLocation?.stock?.[p.id] || 0) > 0)
-    const usedIds = new Set(warehouseTransferItems.map(it => it.productId))
-    const nextProd = stockedProds.find(p => !usedIds.has(p.id)) || stockedProds[0] || products[0]
-    setWarehouseTransferItems(prev => [
-      ...prev,
-      {
-        id: `wh-t-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        productId: nextProd?.id || '',
-        quantity: '5',
-      }
-    ])
-  }
-
-  const handleRemoveWarehouseTransferRow = (rowId) => {
-    if (warehouseTransferItems.length <= 1) return
-    setWarehouseTransferItems(prev => prev.filter(r => r.id !== rowId))
-  }
-
-  const handleUpdateWarehouseTransferRow = (rowId, field, val) => {
-    setWarehouseTransferItems(prev => prev.map(r => {
-      if (r.id !== rowId) return r
-      return { ...r, [field]: val }
-    }))
   }
 
   const handleWarehouseTransferSubmit = async (e) => {
     e.preventDefault()
     if (!activeLocation) return
 
-    if (!warehouseTransferForm.toWarehouseId && !warehouseTransferForm.toStoreId) {
-      alert('Please select a destination warehouse or store')
+    const { toWarehouseId, toStoreId, productId, quantity } = warehouseTransferForm
+    const qty = parseInt(quantity, 10)
+
+    if (!toWarehouseId && !toStoreId) {
+      toast.warning('Destination Required', 'Please select a destination warehouse or store.')
       return
     }
 
-    const validItems = warehouseTransferItems
-      .filter(it => it.productId && parseInt(it.quantity, 10) > 0)
-      .map(it => {
-        const prod = products.find(p => p.id === it.productId)
-        return {
-          productId: it.productId,
-          productName: prod?.name || it.productId,
-          quantity: parseInt(it.quantity, 10),
-        }
-      })
-
-    if (validItems.length === 0) {
-      alert('Please select at least one item with quantity > 0')
+    if (!productId || isNaN(qty) || qty <= 0) {
+      toast.warning('Invalid Input', 'Please select a product and enter a valid quantity (> 0).')
       return
     }
 
-    for (const item of validItems) {
-      const available = activeLocation.stock?.[item.productId] || 0
-      if (item.quantity > available) {
-        alert(`Transfer quantity for "${item.productName}" (${item.quantity}) exceeds available stock (${available}) in ${activeLocation.name}`)
-        return
-      }
+    const available = activeLocation.stock?.[productId] || 0
+    if (qty > available) {
+      const prod = products.find(p => p.id === productId)
+      toast.error('Stock Exceeded', `Transfer quantity (${qty}) exceeds available stock (${available}) for "${prod?.name || 'Product'}".`)
+      return
     }
+
+    const prod = products.find(p => p.id === productId)
 
     const success = await transferStock({
       fromWarehouseId: activeLocation.id,
-      toWarehouseId: warehouseTransferForm.toWarehouseId || undefined,
-      toStoreId: warehouseTransferForm.toStoreId || undefined,
-      items: validItems,
+      toWarehouseId: toWarehouseId || undefined,
+      toStoreId: toStoreId || undefined,
+      items: [{
+        productId,
+        productName: prod?.name || productId,
+        quantity: qty,
+      }],
     })
 
     if (success) {
       setIsWarehouseTransferOpen(false)
-      setWarehouseTransferItems([
-        { id: `wh-t-${Date.now()}`, productId: '', quantity: '5' }
-      ])
+      toast.success('Stock Transferred', `Transferred ${qty} unit${qty > 1 ? 's' : ''} of "${prod?.name || 'Product'}".`)
+      setWarehouseTransferForm(prev => ({
+        ...prev,
+        quantity: '5',
+      }))
     } else {
-      alert('Could not complete transfer. Please verify stock availability.')
+      toast.error('Transfer Failed', 'Could not complete transfer. Please verify stock availability.')
     }
   }
 
@@ -803,7 +763,7 @@ export function InventoryPage() {
     if (!activeLocation) return
 
     if (!storeAddProductForm.name.trim()) {
-      alert('Please enter a product name')
+      toast.warning('Product Name Required', 'Please enter a product name.')
       return
     }
 
@@ -819,6 +779,7 @@ export function InventoryPage() {
 
     if (created) {
       setIsStoreAddProductOpen(false)
+      toast.success('Product Added', `"${created.name}" added to ${activeLocation.name}.`)
       setStoreAddProductForm({
         name: '',
         category: 'General',
@@ -828,177 +789,167 @@ export function InventoryPage() {
         minStockThreshold: '5',
       })
     } else {
-      alert('Failed to add product to store.')
+      toast.error('Creation Failed', 'Failed to add product to store.')
     }
-  }
-
-  const handleAddStorePurchaseRow = () => {
-    const usedIds = new Set(storePurchaseItems.map(it => it.productId))
-    const nextProd = products.find(p => !usedIds.has(p.id)) || products[0]
-    setStorePurchaseItems(prev => [
-      ...prev,
-      {
-        id: `st-p-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        productId: nextProd?.id || '',
-        quantity: '10',
-        costPerUnit: nextProd?.costPrice || '20',
-      }
-    ])
-  }
-
-  const handleRemoveStorePurchaseRow = (rowId) => {
-    if (storePurchaseItems.length <= 1) return
-    setStorePurchaseItems(prev => prev.filter(r => r.id !== rowId))
-  }
-
-  const handleUpdateStorePurchaseRow = (rowId, field, val) => {
-    setStorePurchaseItems(prev => prev.map(r => {
-      if (r.id !== rowId) return r
-      const updated = { ...r, [field]: val }
-      if (field === 'productId') {
-        const prod = products.find(p => p.id === val)
-        if (prod) updated.costPerUnit = prod.costPrice || '20'
-      }
-      return updated
-    }))
   }
 
   const handleStoreDirectPurchaseSubmit = async (e) => {
     e.preventDefault()
     if (!activeLocation) return
 
-    const validItems = storePurchaseItems
-      .filter(it => it.productId && parseInt(it.quantity, 10) > 0)
-      .map(it => {
-        const prod = products.find(p => p.id === it.productId)
-        return {
-          productId: it.productId,
-          productName: prod?.name || it.productId,
-          quantity: parseInt(it.quantity, 10),
-          costPerUnit: parseFloat(it.costPerUnit) || 0,
-        }
-      })
+    const {
+      productId,
+      quantity,
+      costPerUnit,
+      paymentMethod,
+      bankProvider,
+      bankReference,
+      telebirrReference,
+      supplierName,
+      newProductName,
+      newProductCategory,
+      newProductSellingPrice,
+    } = storeDirectPurchaseForm
+    const qty = parseInt(quantity, 10)
+    const cost = parseFloat(costPerUnit) || 0
 
-    if (validItems.length === 0) {
-      alert('Please add at least one product with quantity > 0')
+    if (isNaN(qty) || qty <= 0) {
+      toast.warning('Invalid Quantity', 'Please enter a valid quantity (> 0).')
       return
     }
 
-    let bankProviderName = undefined
-    if (storeDirectPurchaseForm.paymentMethod === 'Banking') {
-      const bankObj = ETHIOPIAN_PAYMENT_PROVIDERS.find(b => b.id === storeDirectPurchaseForm.bankProvider)
-      bankProviderName = bankObj ? bankObj.name : storeDirectPurchaseForm.bankProvider
+    let targetProductId = productId
+    let targetProductName = ''
+
+    if (isStorePurchaseNewProduct) {
+      if (!newProductName || !newProductName.trim()) {
+        toast.warning('Product Name Required', 'Please enter a name for the new product.')
+        return
+      }
+      const created = await createProduct({
+        name: newProductName.trim(),
+        category: newProductCategory?.trim() || 'General',
+        sellingPrice: newProductSellingPrice || '30',
+        costPrice: costPerUnit || '20',
+        defaultCommissionRate: 5,
+        minStockThreshold: 5,
+      }, currentUser)
+      if (!created) {
+        toast.error('Creation Failed', 'Failed to create new product. Please try again.')
+        return
+      }
+      targetProductId = created.id
+      targetProductName = created.name
+    } else {
+      if (!productId) {
+        toast.warning('Product Required', 'Please select a product.')
+        return
+      }
+      const prod = products.find(p => p.id === productId)
+      targetProductName = prod?.name || 'Product'
     }
 
-    const ref = storeDirectPurchaseForm.paymentMethod === 'Banking'
-      ? storeDirectPurchaseForm.bankReference
-      : storeDirectPurchaseForm.paymentMethod === 'Telebirr'
-      ? storeDirectPurchaseForm.telebirrReference
+    let bankProviderName = undefined
+    if (paymentMethod === 'Banking') {
+      const bankObj = ETHIOPIAN_PAYMENT_PROVIDERS.find(b => b.id === bankProvider)
+      bankProviderName = bankObj ? bankObj.name : bankProvider
+    }
+
+    const ref = paymentMethod === 'Banking'
+      ? bankReference
+      : paymentMethod === 'Telebirr'
+      ? telebirrReference
       : ''
 
-    const supplierStr = storeDirectPurchaseForm.supplierName
-      ? `${storeDirectPurchaseForm.supplierName}${ref ? ` (Ref: ${ref})` : ''}`
+    const supplierStr = supplierName
+      ? `${supplierName}${ref ? ` (Ref: ${ref})` : ''}`
       : (ref ? `Ref: ${ref}` : undefined)
 
     const success = await recordDirectPurchase({
       storeId: activeLocation.id,
-      items: validItems,
-      paymentMethod: storeDirectPurchaseForm.paymentMethod,
+      items: [{
+        productId: targetProductId,
+        productName: targetProductName,
+        quantity: qty,
+        costPerUnit: cost,
+      }],
+      paymentMethod,
       bankProvider: bankProviderName,
       supplierName: supplierStr,
     })
 
     if (success) {
       setIsStoreDirectPurchaseOpen(false)
-      setStorePurchaseItems([
-        { id: `st-p-${Date.now()}`, productId: products[0]?.id || '', quantity: '10', costPerUnit: products[0]?.costPrice || '20' }
-      ])
+      setIsStorePurchaseNewProduct(false)
+      toast.success(
+        isStorePurchaseNewProduct ? 'New Product Added & Stocked' : 'Purchase Recorded',
+        `Added ${qty} units of "${targetProductName}" to ${activeLocation.name}.`
+      )
       setStoreDirectPurchaseForm(prev => ({
         ...prev,
+        productId: '',
+        quantity: '10',
         supplierName: '',
         bankReference: '',
         telebirrReference: '',
+        newProductName: '',
+        newProductCategory: 'General',
+        newProductSellingPrice: '30',
       }))
     } else {
-      alert('Could not record direct store purchase.')
+      toast.error('Purchase Failed', 'Could not record direct store purchase.')
     }
-  }
-
-  const handleAddStoreTransferRow = () => {
-    const stockedProds = products.filter(p => (activeLocation?.stock?.[p.id] || 0) > 0)
-    const usedIds = new Set(storeTransferItems.map(it => it.productId))
-    const nextProd = stockedProds.find(p => !usedIds.has(p.id)) || stockedProds[0] || products[0]
-    setStoreTransferItems(prev => [
-      ...prev,
-      {
-        id: `st-t-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        productId: nextProd?.id || '',
-        quantity: '5',
-      }
-    ])
-  }
-
-  const handleRemoveStoreTransferRow = (rowId) => {
-    if (storeTransferItems.length <= 1) return
-    setStoreTransferItems(prev => prev.filter(r => r.id !== rowId))
-  }
-
-  const handleUpdateStoreTransferRow = (rowId, field, val) => {
-    setStoreTransferItems(prev => prev.map(r => {
-      if (r.id !== rowId) return r
-      return { ...r, [field]: val }
-    }))
   }
 
   const handleStoreTransferSubmit = async (e) => {
     e.preventDefault()
     if (!activeLocation) return
 
-    if (!storeTransferForm.toWarehouseId && !storeTransferForm.toStoreId) {
-      alert('Please select a destination warehouse or store')
+    const { toWarehouseId, toStoreId, productId, quantity } = storeTransferForm
+    const qty = parseInt(quantity, 10)
+
+    if (!toWarehouseId && !toStoreId) {
+      toast.warning('Destination Required', 'Please select a destination warehouse or store.')
       return
     }
 
-    const validItems = storeTransferItems
-      .filter(it => it.productId && parseInt(it.quantity, 10) > 0)
-      .map(it => {
-        const prod = products.find(p => p.id === it.productId)
-        return {
-          productId: it.productId,
-          productName: prod?.name || it.productId,
-          quantity: parseInt(it.quantity, 10),
-        }
-      })
-
-    if (validItems.length === 0) {
-      alert('Please select at least one item with quantity > 0')
+    if (!productId || isNaN(qty) || qty <= 0) {
+      toast.warning('Invalid Input', 'Please select a product and enter a valid quantity (> 0).')
       return
     }
 
-    for (const item of validItems) {
-      const available = activeLocation.stock?.[item.productId] || 0
-      if (item.quantity > available) {
-        alert(`Transfer quantity for "${item.productName}" (${item.quantity}) exceeds available stock (${available}) in ${activeLocation.name}`)
-        return
-      }
+    const available = activeLocation.stock?.[productId] || 0
+    if (qty > available) {
+      const prod = products.find(p => p.id === productId)
+      toast.error('Stock Exceeded', `Transfer quantity (${qty}) exceeds available stock (${available}) for "${prod?.name || 'Product'}".`)
+      return
     }
+
+    const prod = products.find(p => p.id === productId)
 
     const success = await transferStock({
       fromStoreId: activeLocation.id,
-      toWarehouseId: storeTransferForm.toWarehouseId || undefined,
-      toStoreId: storeTransferForm.toStoreId || undefined,
-      items: validItems,
+      toWarehouseId: toWarehouseId || undefined,
+      toStoreId: toStoreId || undefined,
+      items: [{
+        productId,
+        productName: prod?.name || productId,
+        quantity: qty,
+      }],
     })
 
     if (success) {
       setIsStoreTransferOpen(false)
-      setStoreTransferItems([
-        { id: `st-t-${Date.now()}`, productId: '', quantity: '5' }
-      ])
+      toast.success('Stock Transferred', `Transferred ${qty} unit${qty > 1 ? 's' : ''} of "${prod?.name || 'Product'}".`)
+      setStoreTransferForm(prev => ({
+        ...prev,
+        quantity: '5',
+      }))
     } else {
-      alert('Could not complete transfer. Please verify stock availability.')
+      toast.error('Transfer Failed', 'Could not complete transfer. Please verify stock availability.')
     }
   }
+
   const handlePurchaseSubmit = async (e) => {
     e.preventDefault()
     let bankProviderName = null
@@ -1015,7 +966,7 @@ export function InventoryPage() {
 
         if (it.isNewProduct) {
           if (!it.newProductName || !it.newProductName.trim()) {
-            alert('Please specify a product name for all new items in the purchase manifest.')
+            toast.warning('Product Name Required', 'Please specify a product name for all new items in the purchase manifest.')
             return
           }
           const created = await createProduct({
@@ -1027,7 +978,7 @@ export function InventoryPage() {
             minStockThreshold: 10,
           }, currentUser)
           if (!created) {
-            alert(`Failed to create product "${it.newProductName}".`)
+            toast.error('Creation Failed', `Failed to create product "${it.newProductName}".`)
             return
           }
           validItems.push({
@@ -1048,7 +999,7 @@ export function InventoryPage() {
       }
 
       if (validItems.length === 0) {
-        alert('Please add at least one valid item with quantity greater than 0.')
+        toast.warning('No Items', 'Please add at least one valid item with quantity greater than 0.')
         return
       }
 
@@ -1061,6 +1012,11 @@ export function InventoryPage() {
       }, currentUser)
 
       setIsPurchaseModalOpen(false)
+      const st = stores.find(s => s.id === purchaseForm.storeId)
+      toast.success(
+        'Direct Purchase Recorded',
+        `Purchased ${validItems.length} product(s) for ${st?.name || 'store'}.`
+      )
       setBulkPurchaseItems([
         {
           id: `bulk-purch-${Date.now()}`,
@@ -1081,7 +1037,7 @@ export function InventoryPage() {
 
     if (isPurchaseCreatingNewProduct) {
       if (!purchaseForm.newProductName.trim()) {
-        alert('Please enter a product name')
+        toast.warning('Product Name Required', 'Please enter a product name.')
         return
       }
       const created = await createProduct({
@@ -1093,7 +1049,7 @@ export function InventoryPage() {
         minStockThreshold: purchaseForm.newProductMinThreshold,
       }, currentUser)
       if (!created) {
-        alert('Failed to create product. Please try again.')
+        toast.error('Creation Failed', 'Failed to create product. Please try again.')
         return
       }
       targetProductId = created.id
@@ -1111,6 +1067,12 @@ export function InventoryPage() {
 
     setIsPurchaseModalOpen(false)
     setIsPurchaseCreatingNewProduct(false)
+    const stObj = stores.find(s => s.id === purchaseForm.storeId)
+    const prObj = products.find(p => p.id === targetProductId)
+    toast.success(
+      'Direct Purchase Recorded',
+      `Purchased ${purchaseForm.quantity} units of "${prObj?.name || 'Product'}" for ${stObj?.name || 'store'}.`
+    )
     setPurchaseForm(prev => ({
       ...prev,
       quantity: '10',
@@ -1123,7 +1085,7 @@ export function InventoryPage() {
   const handleCreateStandaloneProduct = async (e) => {
     e.preventDefault()
     if (!standaloneProductForm.name.trim()) {
-      alert('Please enter a product name')
+      toast.warning('Product Name Required', 'Please enter a product name.')
       return
     }
     const created = await createProduct({
@@ -1136,7 +1098,7 @@ export function InventoryPage() {
     }, currentUser)
 
     if (!created) {
-      alert('Failed to create product.')
+      toast.error('Creation Failed', 'Failed to create product.')
       return
     }
 
@@ -1170,6 +1132,7 @@ export function InventoryPage() {
     }
 
     setIsAddProductModalOpen(false)
+    toast.success('Product Created', `"${created.name}" created and added to catalog.`)
     setStandaloneProductForm({
       name: '',
       category: 'General',
@@ -1202,6 +1165,7 @@ export function InventoryPage() {
     e.preventDefault()
     overrideStock(overrideForm, currentUser)
     setIsOverrideModalOpen(false)
+    toast.success('Stock Adjusted', 'Inventory stock count successfully adjusted.')
   }
 
   // Open Product Pricing Edit Modal with a specific product
@@ -1241,6 +1205,8 @@ export function InventoryPage() {
       minStockThreshold: productPricingForm.minStockThreshold,
     }, currentUser)
     
+    const prod = products.find(p => p.id === productPricingForm.productId)
+    toast.success('Pricing Updated', `Saved prices and margins for "${prod?.name || 'Product'}".`)
     setPricingSavedToast(true)
     setTimeout(() => {
       setPricingSavedToast(false)
@@ -1251,7 +1217,9 @@ export function InventoryPage() {
   const handleAddStoreSubmit = (e) => {
     e.preventDefault()
     if (!newStoreForm.name.trim()) return
+    const storeName = newStoreForm.name.trim()
     addStore(newStoreForm, currentUser)
+    toast.success('Store Added', `"${storeName}" created successfully.`)
     setNewStoreForm({ name: '', location: '' })
     setIsAddStoreModalOpen(false)
   }
@@ -1260,6 +1228,7 @@ export function InventoryPage() {
   const handleDeleteStore = (store) => {
     if (window.confirm(`Are you sure you want to delete "${store.name}"? This action is permanent and will be logged in the audit trail.`)) {
       deleteStore(store.id, currentUser)
+      toast.success('Store Removed', `"${store.name}" has been deleted.`)
     }
   }
 
@@ -1283,11 +1252,8 @@ export function InventoryPage() {
             <div>
               <h1 className="text-xl sm:text-2xl font-black tracking-tight text-slate-900 flex items-center gap-2">
                 <Boxes className="w-5 h-5 sm:w-6 sm:h-6 text-slate-900" />
-                Stock & Inventory Locations
+                Inventory
               </h1>
-              <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
-                Select a warehouse or retail store below to inspect and manage stock levels
-              </p>
             </div>
 
             {/* Quick Actions: Mobile-First 2-button layout (Transfer Stock & Add Store only) */}
@@ -1296,13 +1262,12 @@ export function InventoryPage() {
                 variant="secondary"
                 size="md"
                 onClick={() => {
-                  setTransferItems([
-                    {
-                      id: `trans-${Date.now()}`,
-                      productId: products[0]?.id || '',
-                      quantity: '5'
-                    }
-                  ])
+                  setTransferForm(prev => ({
+                    fromWarehouseId: prev.fromWarehouseId || warehouses[0]?.id || '',
+                    toStoreId: prev.toStoreId || stores[0]?.id || '',
+                    productId: prev.productId || products[0]?.id || '',
+                    quantity: '5',
+                  }))
                   setIsTransferModalOpen(true)
                 }}
                 className="w-full sm:w-auto flex items-center justify-center gap-2 text-xs sm:text-sm font-bold min-h-[46px] rounded-xl shadow-xs border border-slate-200 hover:bg-slate-100 active:scale-[0.98] transition-all touch-manipulation cursor-pointer px-4"
@@ -1442,40 +1407,33 @@ export function InventoryPage() {
         /* ═════════════════════════════════════════════════════════════════════ */
         <div className="space-y-5 animate-in fade-in duration-200">
           {/* Back Button & Location Title Bar */}
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-200">
-            <div className="flex items-center gap-3">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setSearchParams({})}
-                className="flex items-center gap-1.5 text-xs font-bold border-slate-300 text-slate-700 hover:bg-slate-100 shrink-0 cursor-pointer min-h-[44px] px-3.5 rounded-xl touch-manipulation"
-              >
-                <ArrowLeft className="w-4 h-4" />
-                <span>All Locations</span>
-              </Button>
-
-              <div className="h-6 w-px bg-slate-200" />
-
-              <div>
-                <div className="flex items-center gap-2">
-                  <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
-                    {activeLocation.name}
-                  </h1>
-                  <Badge variant={activeLocationType === 'warehouse' ? 'purple' : 'info'} className="text-xs font-bold">
-                    {activeLocationType === 'warehouse' ? 'Warehouse' : 'Retail Store'}
-                  </Badge>
-                </div>
-                <p className="text-xs text-slate-500 mt-0.5 font-semibold">
-                  {products.filter(p => (activeLocation.stock?.[p.id] || 0) > 0).length} Products in Stock &bull; {products.reduce((acc, p) => acc + (activeLocation.stock?.[p.id] || 0), 0)} Total Units
-                </p>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-200">
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <button
+                  type="button"
+                  onClick={() => setSearchParams({})}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-slate-200 bg-white text-xs font-bold text-slate-700 hover:bg-slate-50 active:scale-95 transition-all shadow-2xs cursor-pointer"
+                >
+                  <ArrowLeft className="w-3.5 h-3.5" />
+                  <span>Locations</span>
+                </button>
+                <Badge variant={activeLocationType === 'warehouse' ? 'purple' : 'info'} className="text-[10px] font-bold">
+                  {activeLocationType === 'warehouse' ? '🏭 Warehouse' : '🏪 Retail Store'}
+                </Badge>
               </div>
+              <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight leading-tight">
+                {activeLocation.name}
+              </h1>
+              <p className="text-xs text-slate-500 font-medium mt-0.5">
+                {locationFilteredProducts.length} Items &bull; {products.reduce((acc, p) => acc + (activeLocation.stock?.[p.id] || 0), 0)} Total Units
+              </p>
             </div>
 
-            {/* Location Actions: + Add, Direct Purchase, Transfer Stock */}
-            <div className="grid grid-cols-3 sm:flex sm:items-center gap-2 w-full md:w-auto">
+            {/* Location Actions: Add Item, Direct Purchase, Transfer */}
+            <div className="grid grid-cols-3 sm:flex sm:items-center gap-2 w-full sm:w-auto">
               {activeLocationType === 'warehouse' ? (
                 <>
-                  {/* 1. + Add Product Directly to Warehouse */}
                   <Button
                     size="md"
                     variant="primary"
@@ -1490,36 +1448,40 @@ export function InventoryPage() {
                       })
                       setIsWarehouseAddProductOpen(true)
                     }}
-                    className="w-full sm:w-auto bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 min-h-[44px] rounded-xl cursor-pointer touch-manipulation shadow-xs px-3 sm:px-4"
+                    className="w-full sm:w-auto bg-black hover:bg-slate-800 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 py-2.5 px-2 sm:px-4 rounded-xl cursor-pointer"
                   >
                     <Plus className="w-4 h-4 shrink-0" />
-                    <span>Add</span>
+                    <span>Add Item</span>
                   </Button>
 
-                  {/* 2. Direct Purchase to Warehouse */}
                   <Button
                     size="md"
                     variant="outline"
                     onClick={() => {
                       const firstProd = products[0]
-                      setWarehousePurchaseItems([
-                        { id: `wh-p-${Date.now()}`, productId: firstProd?.id || '', quantity: '10', costPerUnit: firstProd?.costPrice || '20' }
-                      ])
                       setWarehouseDirectPurchaseForm(prev => ({
                         ...prev,
+                        productId: firstProd?.id || '',
+                        quantity: '10',
+                        costPerUnit: firstProd?.costPrice || '20',
+                        paymentMethod: 'Banking',
+                        bankProvider: 'cbe',
                         supplierName: '',
                         bankReference: '',
                         telebirrReference: '',
+                        newProductName: '',
+                        newProductCategory: 'General',
+                        newProductSellingPrice: '30',
                       }))
+                      setIsWarehousePurchaseNewProduct(false)
                       setIsWarehouseDirectPurchaseOpen(true)
                     }}
-                    className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white border-transparent font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 min-h-[44px] rounded-xl cursor-pointer touch-manipulation shadow-xs px-3 sm:px-4"
+                    className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white border-transparent font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 py-2.5 px-2 sm:px-4 rounded-xl cursor-pointer shadow-xs"
                   >
                     <ShoppingBag className="w-4 h-4 shrink-0" />
-                    <span className="truncate">Direct Purchase</span>
+                    <span>Direct Purchase</span>
                   </Button>
 
-                  {/* 3. Transfer Stock */}
                   <Button
                     size="md"
                     variant="outline"
@@ -1529,21 +1491,19 @@ export function InventoryPage() {
                       setWarehouseTransferForm({
                         toWarehouseId: otherWh?.id || '',
                         toStoreId: otherWh ? '' : (stores[0]?.id || ''),
+                        productId: stockedProd?.id || products[0]?.id || '',
+                        quantity: '5',
                       })
-                      setWarehouseTransferItems([
-                        { id: `wh-t-${Date.now()}`, productId: stockedProd?.id || products[0]?.id || '', quantity: '5' }
-                      ])
                       setIsWarehouseTransferOpen(true)
                     }}
-                    className="w-full sm:w-auto text-xs sm:text-sm font-bold border-slate-300 text-slate-800 bg-white hover:bg-slate-50 flex items-center justify-center gap-1.5 min-h-[44px] rounded-xl cursor-pointer touch-manipulation shadow-xs px-3 sm:px-4"
+                    className="w-full sm:w-auto text-xs sm:text-sm font-bold border-slate-300 text-slate-800 bg-white hover:bg-slate-50 flex items-center justify-center gap-1.5 py-2.5 px-2.5 sm:px-4 rounded-xl cursor-pointer"
                   >
                     <ArrowRightLeft className="w-4 h-4 text-purple-700 shrink-0" />
-                    <span className="truncate">Transfer Stock</span>
+                    <span>Transfer</span>
                   </Button>
                 </>
               ) : (
                 <>
-                  {/* 1. + Add Product Directly to Store */}
                   <Button
                     size="md"
                     variant="primary"
@@ -1558,36 +1518,40 @@ export function InventoryPage() {
                       })
                       setIsStoreAddProductOpen(true)
                     }}
-                    className="w-full sm:w-auto bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 min-h-[44px] rounded-xl cursor-pointer touch-manipulation shadow-xs px-3 sm:px-4"
+                    className="w-full sm:w-auto bg-black hover:bg-slate-800 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 py-2.5 px-2 sm:px-4 rounded-xl cursor-pointer"
                   >
                     <Plus className="w-4 h-4 shrink-0" />
-                    <span>Add</span>
+                    <span>Add Item</span>
                   </Button>
 
-                  {/* 2. Direct Purchase to Store */}
                   <Button
                     size="md"
                     variant="outline"
                     onClick={() => {
                       const firstProd = products[0]
-                      setStorePurchaseItems([
-                        { id: `st-p-${Date.now()}`, productId: firstProd?.id || '', quantity: '10', costPerUnit: firstProd?.costPrice || '20' }
-                      ])
                       setStoreDirectPurchaseForm(prev => ({
                         ...prev,
+                        productId: firstProd?.id || '',
+                        quantity: '10',
+                        costPerUnit: firstProd?.costPrice || '20',
+                        paymentMethod: 'Banking',
+                        bankProvider: 'cbe',
                         supplierName: '',
                         bankReference: '',
                         telebirrReference: '',
+                        newProductName: '',
+                        newProductCategory: 'General',
+                        newProductSellingPrice: '30',
                       }))
+                      setIsStorePurchaseNewProduct(false)
                       setIsStoreDirectPurchaseOpen(true)
                     }}
-                    className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white border-transparent font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 min-h-[44px] rounded-xl cursor-pointer touch-manipulation shadow-xs px-3 sm:px-4"
+                    className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white border-transparent font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 py-2.5 px-2 sm:px-4 rounded-xl cursor-pointer shadow-xs"
                   >
                     <ShoppingBag className="w-4 h-4 shrink-0" />
-                    <span className="truncate">Direct Purchase</span>
+                    <span>Direct Purchase</span>
                   </Button>
 
-                  {/* 3. Transfer Stock */}
                   <Button
                     size="md"
                     variant="outline"
@@ -1597,54 +1561,85 @@ export function InventoryPage() {
                       setStoreTransferForm({
                         toWarehouseId: defaultWh,
                         toStoreId: stores.find(s => s.id !== activeLocation.id)?.id || '',
+                        productId: stockedProd?.id || products[0]?.id || '',
+                        quantity: '5',
                       })
-                      setStoreTransferItems([
-                        { id: `st-t-${Date.now()}`, productId: stockedProd?.id || products[0]?.id || '', quantity: '5' }
-                      ])
                       setIsStoreTransferOpen(true)
                     }}
-                    className="w-full sm:w-auto text-xs sm:text-sm font-bold border-slate-300 text-slate-800 bg-white hover:bg-slate-50 flex items-center justify-center gap-1.5 min-h-[44px] rounded-xl cursor-pointer touch-manipulation shadow-xs px-3 sm:px-4"
+                    className="w-full sm:w-auto text-xs sm:text-sm font-bold border-slate-300 text-slate-800 bg-white hover:bg-slate-50 flex items-center justify-center gap-1.5 py-2.5 px-2 sm:px-4 rounded-xl cursor-pointer"
                   >
                     <ArrowRightLeft className="w-4 h-4 text-emerald-700 shrink-0" />
-                    <span className="truncate">Transfer Stock</span>
+                    <span>Transfer</span>
                   </Button>
                 </>
               )}
             </div>
           </div>
 
-          {/* Search Bar & Category Filter for this Location */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-3.5 rounded-2xl border border-slate-200">
-            <div className="relative flex-1">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
-              <input
-                type="text"
-                placeholder={`Search products in ${activeLocation.name}...`}
-                value={globalSearchQuery}
-                onChange={(e) => setGlobalSearchQuery(e.target.value)}
-                className="w-full text-xs sm:text-sm pl-10 pr-9 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-              {globalSearchQuery && (
+          {/* Search Bar & View Controls (Merged, Space-Saving) */}
+          <div className="bg-white p-2.5 sm:p-3 rounded-2xl border border-slate-200 space-y-2 shadow-2xs">
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                <input
+                  type="text"
+                  placeholder="Search products..."
+                  value={globalSearchQuery}
+                  onChange={(e) => setGlobalSearchQuery(e.target.value)}
+                  className="w-full text-xs sm:text-sm pl-9 pr-8 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
+                />
+                {globalSearchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setGlobalSearchQuery('')}
+                    className="absolute right-2.5 top-2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+
+              {/* View Switcher Toggle */}
+              <div className="inline-flex rounded-xl p-0.5 bg-slate-100 border border-slate-200 shrink-0">
                 <button
                   type="button"
-                  onClick={() => setGlobalSearchQuery('')}
-                  className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600 cursor-pointer"
+                  onClick={() => setStockViewMode('table')}
+                  className={`p-1.5 sm:px-2.5 sm:py-1 rounded-lg flex items-center gap-1 text-xs font-bold transition-all cursor-pointer ${
+                    stockViewMode === 'table'
+                      ? 'bg-white text-slate-900 shadow-xs'
+                      : 'text-slate-400 hover:text-slate-800'
+                  }`}
+                  title="Table View"
                 >
-                  <X className="w-4 h-4" />
+                  <TableIcon className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Table</span>
                 </button>
-              )}
+                <button
+                  type="button"
+                  onClick={() => setStockViewMode('cards')}
+                  className={`p-1.5 sm:px-2.5 sm:py-1 rounded-lg flex items-center gap-1 text-xs font-bold transition-all cursor-pointer ${
+                    stockViewMode === 'cards'
+                      ? 'bg-white text-slate-900 shadow-xs'
+                      : 'text-slate-400 hover:text-slate-800'
+                  }`}
+                  title="Card View"
+                >
+                  <LayoutGrid className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Cards</span>
+                </button>
+              </div>
             </div>
 
-            {/* Category Filter Pills */}
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
+            {/* Category Filter Pills (Horizontal scrollable) */}
+            <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-0.5">
               {availableCategories.map(cat => (
                 <button
                   key={cat}
                   type="button"
                   onClick={() => setSelectedCategory(cat)}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors shrink-0 cursor-pointer ${
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors shrink-0 cursor-pointer ${
                     selectedCategory === cat
-                      ? 'bg-slate-900 text-white'
+                      ? 'bg-black text-white'
                       : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                   }`}
                 >
@@ -1654,12 +1649,198 @@ export function InventoryPage() {
             </div>
           </div>
 
-          {/* Products Stock Cards Grid */}
+          {/* Quick Seed Button - Only shown when inventory is empty */}
+          {isOwner && products.length === 0 && (
+            <div className="p-4 bg-amber-50 rounded-2xl border border-amber-200 text-center space-y-2">
+              <p className="text-xs font-bold text-amber-900">Your inventory is currently empty</p>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleSeedSampleData}
+                disabled={isSeeding}
+                className="text-xs font-bold border-amber-300 text-amber-900 bg-white hover:bg-amber-100 inline-flex items-center gap-1.5 rounded-xl cursor-pointer"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+                <span>{isSeeding ? 'Loading Auto Parts...' : '⚡ Seed 15 Auto Parts'}</span>
+              </Button>
+            </div>
+          )}
+
+          {/* Products Stock Display (Table or Cards) */}
           {locationFilteredProducts.length === 0 ? (
             <div className="text-center py-12 bg-white rounded-2xl border border-slate-200 text-slate-400 text-sm">
               No products found matching your search or category filter.
             </div>
+          ) : stockViewMode === 'table' ? (
+            /* ══════════════════════════════════════════════════════════════════ */
+            /* TABLE DESIGN: Clean & Basic for Salesperson, Full for Owner        */
+            /* ══════════════════════════════════════════════════════════════════ */
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50/90 border-b border-slate-200 text-[11px] font-black text-slate-500 uppercase tracking-wider">
+                      <th className="py-3 px-3 sm:px-4">Item</th>
+                      <th className="py-3 px-3 hidden md:table-cell">Category</th>
+                      <th className="py-3 px-2 text-center hidden sm:table-cell">Unit</th>
+                      <th className="py-3 px-2 sm:px-3 text-center">Stock</th>
+                      <th className="py-3 px-2.5 sm:px-4">Price</th>
+                      <th className="py-3 px-3 text-center hidden sm:table-cell">Status</th>
+                      {isOwner && (
+                        <>
+                          <th className="py-3 px-3 hidden lg:table-cell">Cost</th>
+                          <th className="py-3 px-3 hidden lg:table-cell">Value</th>
+                          <th className="py-3 px-2 sm:px-3.5 text-right">Actions</th>
+                        </>
+                      )}
+                      {!isOwner && activeLocationType === 'store' && (
+                        <th className="py-3 px-2 text-right">Action</th>
+                      )}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 text-xs sm:text-sm">
+                    {locationFilteredProducts.map((p) => {
+                      const qty = activeLocation.stock?.[p.id] || 0
+                      const isLow = qty > 0 && qty <= (p.minStockThreshold || 5)
+                      const isOut = qty === 0
+
+                      return (
+                        <tr
+                          key={p.id}
+                          className="hover:bg-slate-50/80 transition-colors"
+                        >
+                          {/* Item Name & Code */}
+                          <td className="py-2.5 px-3 sm:px-4">
+                            <div className="flex flex-col">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                {p.code && (
+                                  <span className="font-mono text-[10px] font-black text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
+                                    {p.code}
+                                  </span>
+                                )}
+                                <span className="font-bold text-slate-900 text-xs sm:text-sm leading-snug">
+                                  {p.name}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-1.5 text-[10px] text-slate-400 mt-0.5 sm:hidden">
+                                <span>{p.category || 'General'}</span>
+                                <span>&bull;</span>
+                                <span className="font-semibold text-slate-600">{p.unit || 'Pc'}</span>
+                              </div>
+                            </div>
+                          </td>
+
+                          {/* Category (Hidden on mobile) */}
+                          <td className="py-2.5 px-3 hidden md:table-cell">
+                            <span className="inline-block px-2 py-0.5 rounded-lg bg-slate-100 text-slate-600 text-xs font-semibold">
+                              {p.category || 'General'}
+                            </span>
+                          </td>
+
+                          {/* Unit (Hidden on mobile, merged with name) */}
+                          <td className="py-2.5 px-2 text-center hidden sm:table-cell">
+                            <span className="text-xs font-bold text-slate-600 uppercase">
+                              {p.unit || 'Pc'}
+                            </span>
+                          </td>
+
+                          {/* Stock */}
+                          <td className="py-2.5 px-2 sm:px-3 text-center">
+                            <div className="flex flex-col items-center">
+                              <span className={`font-black text-xs sm:text-sm ${isOut ? 'text-rose-600' : isLow ? 'text-amber-600' : 'text-slate-900'}`}>
+                                {qty}
+                              </span>
+                              <span className={`text-[9px] font-extrabold sm:hidden ${isOut ? 'text-rose-600' : isLow ? 'text-amber-600' : 'text-emerald-700'}`}>
+                                {isOut ? 'Out' : isLow ? 'Low' : 'In Stock'}
+                              </span>
+                            </div>
+                          </td>
+
+                          {/* Price */}
+                          <td className="py-2.5 px-2.5 sm:px-4">
+                            <div className="flex flex-col">
+                              <span className="font-black text-emerald-700 text-xs sm:text-sm">
+                                {formatCurrency(p.sellingPrice)}
+                              </span>
+                              {p.sellingPriceRange && (
+                                <span className="inline-block mt-0.5 text-[9px] font-bold text-amber-800 bg-amber-50 px-1 py-0.2 rounded border border-amber-200 w-fit">
+                                  {p.sellingPriceRange} ETB
+                                </span>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* Status Badge (Desktop only, mobile shows dot/text in Stock cell) */}
+                          <td className="py-2.5 px-3 text-center hidden sm:table-cell">
+                            {isOut ? (
+                              <Badge variant="danger" className="text-[10px] font-bold">Out of Stock</Badge>
+                            ) : isLow ? (
+                              <Badge variant="warning" className="text-[10px] font-bold">Low ({qty})</Badge>
+                            ) : (
+                              <Badge variant="success" className="text-[10px] font-bold">In Stock</Badge>
+                            )}
+                          </td>
+
+                          {/* Owner Cost Price */}
+                          {isOwner && (
+                            <td className="py-2.5 px-3 hidden lg:table-cell text-slate-600 text-xs font-medium">
+                              {formatCurrency(p.costPrice)}
+                            </td>
+                          )}
+
+                          {/* Owner Total Stock Value */}
+                          {isOwner && (
+                            <td className="py-2.5 px-3 hidden lg:table-cell font-bold text-slate-800 text-xs">
+                              {formatCurrency(qty * (p.costPrice || 0))}
+                            </td>
+                          )}
+
+                          {/* Owner Actions */}
+                          {isOwner && (
+                            <td className="py-2.5 px-2 sm:px-3.5 text-right">
+                              <div className="flex items-center justify-end gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenProductPricing(p)}
+                                  title="Adjust Price"
+                                  className="p-1.5 text-emerald-700 hover:bg-emerald-50 rounded-lg transition-colors cursor-pointer"
+                                >
+                                  <Tags className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenOverride(activeLocation.id, activeLocation.name, activeLocationType, p.id, p.name, qty)}
+                                  title="Stock Override"
+                                  className="p-1.5 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                                >
+                                  <SlidersHorizontal className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </td>
+                          )}
+
+                          {/* Salesperson Action (Only in store) */}
+                          {!isOwner && activeLocationType === 'store' && (
+                            <td className="py-3 px-3 text-right">
+                              <a
+                                href={`/pos?store=${activeLocation.id}`}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg transition-colors"
+                              >
+                                <span>Sell</span>
+                              </a>
+                            </td>
+                          )}
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           ) : (
+            /* ══════════════════════════════════════════════════════════════════ */
+            /* CARDS DESIGN: Responsive Card Grid                                 */
+            /* ══════════════════════════════════════════════════════════════════ */
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4">
               {locationFilteredProducts.map((p) => {
                 const qty = activeLocation.stock?.[p.id] || 0
@@ -1673,19 +1854,29 @@ export function InventoryPage() {
                   >
                     <div>
                       <div className="flex items-start justify-between gap-1.5">
-                        <h4 className="text-sm font-bold text-slate-900 line-clamp-1">{p.name}</h4>
-                        <span className="text-xs font-black text-emerald-700 shrink-0">
-                          {formatCurrency(p.sellingPrice)}
-                        </span>
+                        <div>
+                          {p.code && (
+                            <span className="font-mono text-[10px] font-black text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200 mr-1.5">
+                              {p.code}
+                            </span>
+                          )}
+                          <h4 className="text-sm font-bold text-slate-900 inline">{p.name}</h4>
+                        </div>
+                        <div className="flex flex-col items-end shrink-0">
+                          <span className="text-xs font-black text-emerald-700">
+                            {formatCurrency(p.sellingPrice)}
+                          </span>
+                          {p.sellingPriceRange && (
+                            <span className="text-[10px] font-bold text-amber-800 bg-amber-50 px-1 py-0.2 rounded border border-amber-200 mt-0.5">
+                              {p.sellingPriceRange}
+                            </span>
+                          )}
+                        </div>
                       </div>
                       <div className="flex items-center gap-2 mt-1 text-[11px] text-slate-400 font-medium">
-                        <span>Cost: {formatCurrency(p.costPrice)}</span>
-                        {p.category && (
-                          <>
-                            <span>&bull;</span>
-                            <span>{p.category}</span>
-                          </>
-                        )}
+                        {isOwner && <span>Cost: {formatCurrency(p.costPrice)} &bull; </span>}
+                        {p.category && <span>{p.category} &bull; </span>}
+                        <span>{p.unit || 'Piece'}</span>
                       </div>
                     </div>
 
@@ -1697,7 +1888,7 @@ export function InventoryPage() {
                         ) : isLow ? (
                           <Badge variant="warning" className="text-[10px]">Low ({qty})</Badge>
                         ) : (
-                          <span className="text-[11px] text-slate-400 font-medium">units</span>
+                          <span className="text-[11px] text-slate-400 font-medium">{p.unit || 'units'}</span>
                         )}
                       </div>
 
@@ -1724,6 +1915,15 @@ export function InventoryPage() {
                           </button>
                         </div>
                       )}
+
+                      {!isOwner && activeLocationType === 'store' && (
+                        <a
+                          href={`/pos?store=${activeLocation.id}`}
+                          className="px-2.5 py-1 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg"
+                        >
+                          Sell
+                        </a>
+                      )}
                     </div>
                   </div>
                 )
@@ -1731,460 +1931,6 @@ export function InventoryPage() {
             </div>
           )}
         </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* 1. RESTOCK CENTRAL WAREHOUSE (BULK INBOUND) MODAL - OWNER ONLY */}
-      {/* ========================================================================= */}
-      {isWarehouseInboundModalOpen && isOwner && (
-        <Modal
-          isOpen={isWarehouseInboundModalOpen && isOwner}
-          onClose={() => setIsWarehouseInboundModalOpen(false)}
-          title="Receive Warehouse Stock (Inbound Shipment)"
-        >
-          <form onSubmit={handleWarehouseInboundSubmit} className="space-y-3.5 text-xs">
-            <div className="p-3 bg-purple-50 text-purple-900 rounded-xl border border-purple-200">
-              <p className="font-bold flex items-center gap-1.5">
-                <Warehouse className="w-4 h-4 text-purple-700" />
-                Primary Hub Stock Inflow
-              </p>
-              <p className="text-[11px] text-purple-700 mt-0.5">
-                Bulk shipment received from wholesale distributor directly into central warehouse storage.
-              </p>
-            </div>
-
-            {/* Target Warehouse */}
-            <div>
-              <label className="block font-bold text-slate-700 mb-1">Target Warehouse:</label>
-              <select
-                value={warehouseInboundForm.warehouseId}
-                onChange={(e) => setWarehouseInboundForm({ ...warehouseInboundForm, warehouseId: e.target.value })}
-                className="w-full p-2.5 bg-white border border-slate-300 rounded-xl min-h-[44px] font-bold"
-              >
-                {warehouses.map(w => (
-                  <option key={w.id} value={w.id}>{w.name} ({w.location})</option>
-                ))}
-              </select>
-            </div>
-
-            {/* Intake Mode Switcher: Single Item vs Bulk Restock */}
-            <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-xl border border-slate-200">
-              <button
-                type="button"
-                onClick={() => setIsInboundBulkMode(false)}
-                className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all touch-manipulation flex items-center justify-center gap-1.5 ${
-                  !isInboundBulkMode
-                    ? 'bg-white text-slate-900 shadow-2xs font-extrabold'
-                    : 'text-slate-500 hover:text-slate-800'
-                }`}
-              >
-                <span>Single Item</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setIsInboundBulkMode(true)}
-                className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all touch-manipulation flex items-center justify-center gap-1.5 ${
-                  isInboundBulkMode
-                    ? 'bg-purple-700 text-white shadow-2xs font-extrabold'
-                    : 'text-slate-500 hover:text-slate-800'
-                }`}
-              >
-                <Boxes className="w-3.5 h-3.5" />
-                <span>Bulk Restock (Multi-Item)</span>
-              </button>
-            </div>
-
-            {isInboundBulkMode ? (
-              /* Bulk / Multi-Item Restock Manifest */
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <span className="font-bold text-slate-800 text-xs">Shipment Item Manifest</span>
-                    <p className="text-[10px] text-slate-500">Receive multiple existing or new products together</p>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleAddBulkInboundRow(false)}
-                      className="h-8 text-xs font-bold border-purple-300 text-purple-700 hover:bg-purple-50 flex items-center gap-1"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>Existing Item</span>
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="primary"
-                      size="sm"
-                      onClick={() => handleAddBulkInboundRow(true)}
-                      className="h-8 text-xs font-bold bg-purple-700 text-white hover:bg-purple-800 flex items-center gap-1 shadow-2xs"
-                    >
-                      <Sparkles className="w-3.5 h-3.5" />
-                      <span>+ New Item</span>
-                    </Button>
-                  </div>
-                </div>
-
-                <div className="space-y-2.5 max-h-[280px] overflow-y-auto pr-0.5">
-                  {bulkInboundItems.map((item, index) => {
-                    const targetWh = warehouses.find(w => w.id === warehouseInboundForm.warehouseId)
-                    const lineSubtotal = (parseInt(item.quantity, 10) || 0) * (parseFloat(item.costPerUnit) || 0)
-
-                    return (
-                      <div key={item.id} className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2 relative">
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-2">
-                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Item #{index + 1}</span>
-                            {item.isNewProduct ? (
-                              <span className="text-[9px] font-extrabold text-purple-700 bg-purple-100 px-1.5 py-0.5 rounded-full">✨ New Product</span>
-                            ) : (
-                              <span className="text-[9px] font-semibold text-slate-500 bg-slate-200/80 px-1.5 py-0.5 rounded-full">Existing Item</span>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-1.5">
-                            <button
-                              type="button"
-                              onClick={() => handleUpdateBulkInboundRow(item.id, 'isNewProduct', !item.isNewProduct)}
-                              className="text-[10px] font-semibold text-purple-700 hover:underline px-1 py-0.5"
-                            >
-                              {item.isNewProduct ? 'Pick Existing' : '+ Convert to New'}
-                            </button>
-                            {bulkInboundItems.length > 1 && (
-                              <button
-                                type="button"
-                                onClick={() => handleRemoveBulkInboundRow(item.id)}
-                                className="text-red-500 hover:text-red-700 p-1 rounded-lg hover:bg-red-50 transition-colors"
-                                title="Remove item"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            )}
-                          </div>
-                        </div>
-
-                        {item.isNewProduct ? (
-                          <div className="space-y-1.5 p-2 bg-purple-50/50 rounded-lg border border-purple-100">
-                            <div>
-                              <label className="block text-[10px] font-bold text-purple-900 mb-0.5">New Product Name *</label>
-                              <input
-                                type="text"
-                                required
-                                placeholder="e.g. Ethiopian Highland Coffee"
-                                value={item.newProductName || ''}
-                                onChange={(e) => handleUpdateBulkInboundRow(item.id, 'newProductName', e.target.value)}
-                                className="w-full p-1.5 bg-white border border-purple-200 rounded-lg text-xs font-bold"
-                              />
-                            </div>
-                            <div className="grid grid-cols-2 gap-2">
-                              <div>
-                                <label className="block text-[10px] font-semibold text-slate-700 mb-0.5">Category</label>
-                                <input
-                                  type="text"
-                                  placeholder="e.g. Groceries"
-                                  value={item.newProductCategory || ''}
-                                  onChange={(e) => handleUpdateBulkInboundRow(item.id, 'newProductCategory', e.target.value)}
-                                  className="w-full p-1.5 bg-white border border-slate-300 rounded-lg text-xs"
-                                />
-                              </div>
-                              <div>
-                                <label className="block text-[10px] font-semibold text-slate-700 mb-0.5">Retail Selling Price (ETB) *</label>
-                                <input
-                                  type="number"
-                                  step="0.01"
-                                  required
-                                  value={item.newProductSellingPrice || '30'}
-                                  onChange={(e) => handleUpdateBulkInboundRow(item.id, 'newProductSellingPrice', e.target.value)}
-                                  className="w-full p-1.5 bg-white border border-slate-300 rounded-lg text-xs font-bold text-emerald-700"
-                                />
-                              </div>
-                            </div>
-                          </div>
-                        ) : (
-                          <div>
-                            <label className="block text-[11px] font-semibold text-slate-700 mb-0.5">Product</label>
-                            <select
-                              value={item.productId}
-                              onChange={(e) => handleUpdateBulkInboundRow(item.id, 'productId', e.target.value)}
-                              className="w-full p-2 bg-white border border-slate-300 rounded-lg text-xs font-bold min-h-[38px]"
-                            >
-                              {products.map(p => (
-                                <option key={p.id} value={p.id}>
-                                  {p.name} (Wh Stock: {targetWh?.stock[p.id] || 0})
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                        )}
-
-                        <div className="grid grid-cols-3 gap-2 items-end">
-                          <div>
-                            <label className="block text-[10px] font-semibold text-slate-700 mb-0.5">Quantity</label>
-                            <input
-                              type="number"
-                              min="1"
-                              required
-                              value={item.quantity}
-                              onChange={(e) => handleUpdateBulkInboundRow(item.id, 'quantity', e.target.value)}
-                              className="w-full p-2 bg-white border border-slate-300 rounded-lg text-xs font-bold text-slate-900"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-[10px] font-semibold text-slate-700 mb-0.5">Cost/Unit (ETB)</label>
-                            <input
-                              type="number"
-                              step="0.01"
-                              min="0"
-                              required
-                              value={item.costPerUnit}
-                              onChange={(e) => handleUpdateBulkInboundRow(item.id, 'costPerUnit', e.target.value)}
-                              className="w-full p-2 bg-white border border-slate-300 rounded-lg text-xs font-bold text-slate-800"
-                            />
-                          </div>
-                          <div className="text-right pb-1">
-                            <span className="block text-[10px] text-slate-400">Subtotal</span>
-                            <span className="text-xs font-black text-purple-900">
-                              {formatCurrency(lineSubtotal)}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-
-                {/* Bulk Shipment Summary Card */}
-                <div className="p-3 bg-purple-50/70 border border-purple-200 rounded-xl flex items-center justify-between text-xs">
-                  <div>
-                    <span className="block text-[11px] font-medium text-purple-700">Total Shipment Manifest:</span>
-                    <span className="font-bold text-purple-900">
-                      {bulkInboundItems.length} Products &bull; {bulkInboundItems.reduce((acc, it) => acc + (parseInt(it.quantity, 10) || 0), 0)} Total Units
-                    </span>
-                  </div>
-                  <div className="text-right">
-                    <span className="block text-[10px] text-purple-600 font-medium">Grand Total Cost</span>
-                    <span className="text-base font-black text-purple-900">
-                      {formatCurrency(
-                        bulkInboundItems.reduce((acc, it) => acc + (parseInt(it.quantity, 10) || 0) * (parseFloat(it.costPerUnit) || 0), 0)
-                      )}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              /* Single Item Intake */
-              <>
-                {/* Product Mode Toggle: Existing Product vs Create New Product */}
-                <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-xl border border-slate-200">
-                  <button
-                    type="button"
-                    onClick={() => setIsInboundCreatingNewProduct(false)}
-                    className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-colors touch-manipulation ${
-                      !isInboundCreatingNewProduct
-                        ? 'bg-white text-slate-900 shadow-2xs'
-                        : 'text-slate-500 hover:text-slate-800'
-                    }`}
-                  >
-                    Existing Item
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setIsInboundCreatingNewProduct(true)}
-                    className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-colors touch-manipulation ${
-                      isInboundCreatingNewProduct
-                        ? 'bg-white text-purple-700 shadow-2xs'
-                        : 'text-slate-500 hover:text-slate-800'
-                    }`}
-                  >
-                    New Product
-                  </button>
-                </div>
-
-                {/* 1A. Existing Product Selection */}
-                {!isInboundCreatingNewProduct ? (
-                  <div>
-                    <label className="block font-bold text-slate-700 mb-1">Select Product to Restock:</label>
-                    <input
-                      type="text"
-                      placeholder="Search product to filter..."
-                      value={inboundProductSearch}
-                      onChange={(e) => setInboundProductSearch(e.target.value)}
-                      className="w-full mb-1.5 p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs"
-                    />
-                    <select
-                      value={warehouseInboundForm.productId}
-                      onChange={(e) => {
-                        const prod = products.find(p => p.id === e.target.value)
-                        setWarehouseInboundForm({
-                          ...warehouseInboundForm,
-                          productId: e.target.value,
-                          costPerUnit: prod ? prod.costPrice : warehouseInboundForm.costPerUnit
-                        })
-                      }}
-                      className="w-full p-2.5 bg-white border border-slate-300 rounded-xl min-h-[44px] font-bold"
-                    >
-                      {products
-                        .filter(p => !inboundProductSearch || p.name.toLowerCase().includes(inboundProductSearch.toLowerCase()))
-                        .map(p => {
-                          const wh = warehouses.find(w => w.id === warehouseInboundForm.warehouseId)
-                          const curWhQty = wh?.stock[p.id] || 0
-                          return (
-                            <option key={p.id} value={p.id}>
-                              {p.name} &bull; Current Warehouse Stock: {curWhQty}
-                            </option>
-                          )
-                        })}
-                    </select>
-                  </div>
-                ) : (
-                  /* 1B. Inline Create New Product Fields */
-                  <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2.5">
-                    <p className="font-bold text-purple-900 text-xs">New Product Details</p>
-                    <div>
-                      <label className="block font-semibold text-slate-700 mb-0.5">Product Name *</label>
-                      <input
-                        type="text"
-                        required
-                        placeholder="e.g. Ethiopian Highland Yirgacheffe Beans (1kg)"
-                        value={warehouseInboundForm.newProductName}
-                        onChange={(e) => setWarehouseInboundForm({ ...warehouseInboundForm, newProductName: e.target.value })}
-                        className="w-full p-2 bg-white border border-slate-300 rounded-lg font-bold"
-                      />
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label className="block font-semibold text-slate-700 mb-0.5">Category</label>
-                        <input
-                          type="text"
-                          placeholder="e.g. Groceries, Beverages"
-                          value={warehouseInboundForm.newProductCategory}
-                          onChange={(e) => setWarehouseInboundForm({ ...warehouseInboundForm, newProductCategory: e.target.value })}
-                          className="w-full p-2 bg-white border border-slate-300 rounded-lg text-xs"
-                        />
-                      </div>
-                      <div>
-                        <label className="block font-semibold text-slate-700 mb-0.5">Retail Selling Price (ETB) *</label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          required
-                          value={warehouseInboundForm.newProductSellingPrice}
-                          onChange={(e) => setWarehouseInboundForm({ ...warehouseInboundForm, newProductSellingPrice: e.target.value })}
-                          className="w-full p-2 bg-white border border-slate-300 rounded-lg text-xs font-bold text-emerald-700"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Quantity & Unit Cost */}
-                <div className="grid grid-cols-2 gap-2.5">
-                  <div>
-                    <label className="block font-bold text-slate-700 mb-1">Inbound Quantity (Units):</label>
-                    <input
-                      type="number"
-                      min="1"
-                      required
-                      value={warehouseInboundForm.quantity}
-                      onChange={(e) => setWarehouseInboundForm({ ...warehouseInboundForm, quantity: e.target.value })}
-                      className="w-full p-2.5 bg-white border border-slate-300 rounded-xl min-h-[44px] text-sm font-black text-slate-900"
-                    />
-                  </div>
-                  <div>
-                    <label className="block font-bold text-slate-700 mb-1">Wholesale Cost / Unit (ETB):</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      required
-                      value={isInboundCreatingNewProduct ? warehouseInboundForm.newProductCostPrice : warehouseInboundForm.costPerUnit}
-                      onChange={(e) => {
-                        if (isInboundCreatingNewProduct) {
-                          setWarehouseInboundForm({ ...warehouseInboundForm, newProductCostPrice: e.target.value })
-                        } else {
-                          setWarehouseInboundForm({ ...warehouseInboundForm, costPerUnit: e.target.value })
-                        }
-                      }}
-                      className="w-full p-2.5 bg-white border border-slate-300 rounded-xl min-h-[44px] text-sm font-bold text-slate-800"
-                    />
-                  </div>
-                </div>
-
-                {/* Live Total Cost Banner */}
-                <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between text-xs">
-                  <span className="text-slate-500 font-medium">Total Purchase Cost:</span>
-                  <span className="text-sm font-black text-purple-900">
-                    {formatCurrency(
-                      (parseInt(warehouseInboundForm.quantity, 10) || 0) * 
-                      (parseFloat(isInboundCreatingNewProduct ? warehouseInboundForm.newProductCostPrice : warehouseInboundForm.costPerUnit) || 0)
-                    )}
-                  </span>
-                </div>
-              </>
-            )}
-
-            {/* Payment Method */}
-            <div>
-              <label className="block font-bold text-slate-700 mb-1">Payment Method Used:</label>
-              <div className="grid grid-cols-3 gap-2">
-                {['Cash', 'Banking', 'Credit'].map(method => (
-                  <button
-                    key={method}
-                    type="button"
-                    onClick={() => setWarehouseInboundForm({ ...warehouseInboundForm, paymentMethod: method })}
-                    className={`p-2.5 rounded-xl border text-xs font-bold transition-all touch-manipulation ${
-                      warehouseInboundForm.paymentMethod === method
-                        ? 'border-slate-900 bg-slate-900 text-white shadow-2xs'
-                        : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
-                    }`}
-                  >
-                    {method}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Ethiopian Banking Dropdown */}
-            {warehouseInboundForm.paymentMethod === 'Banking' && (
-              <div className="p-3 bg-blue-50/70 border border-blue-200 rounded-xl space-y-2">
-                <label className="block font-bold text-blue-900">Ethiopian Bank / Digital Wallet:</label>
-                <select
-                  value={warehouseInboundForm.bankProvider}
-                  onChange={(e) => setWarehouseInboundForm({ ...warehouseInboundForm, bankProvider: e.target.value })}
-                  className="w-full p-2.5 bg-white border border-blue-300 rounded-xl font-bold min-h-[44px]"
-                >
-                  {ETHIOPIAN_PAYMENT_PROVIDERS.map(b => (
-                    <option key={b.id} value={b.id}>{b.name}</option>
-                  ))}
-                </select>
-              </div>
-            )}
-
-            {/* Supplier Name */}
-            <div>
-              <label className="block font-bold text-slate-700 mb-1">Wholesale Supplier / Vendor:</label>
-              <input
-                type="text"
-                placeholder="e.g. Merkato Wholesale Hub / Importer"
-                value={warehouseInboundForm.supplierName}
-                onChange={(e) => setWarehouseInboundForm({ ...warehouseInboundForm, supplierName: e.target.value })}
-                className="w-full p-2.5 bg-white border border-slate-300 rounded-xl min-h-[44px]"
-              />
-            </div>
-
-            {/* Actions */}
-            <div className="pt-2 flex flex-col-reverse sm:flex-row justify-end gap-2">
-              <Button variant="ghost" size="md" type="button" onClick={() => setIsWarehouseInboundModalOpen(false)} className="w-full sm:w-auto min-h-[44px]">
-                Cancel
-              </Button>
-              <Button variant="primary" size="md" type="submit" className="w-full sm:w-auto font-bold min-h-[44px] bg-purple-700 hover:bg-purple-800 text-white shadow-sm">
-                {isInboundBulkMode
-                  ? `Confirm Inbound (${bulkInboundItems.reduce((acc, it) => acc + (parseInt(it.quantity, 10) || 0), 0)} units)`
-                  : 'Confirm Restock'}
-              </Button>
-            </div>
-          </form>
-        </Modal>
       )}
 
       {/* ========================================================================= */}
@@ -2532,7 +2278,7 @@ export function InventoryPage() {
       )}
 
       {/* ───────────────────────────────────────────────────────────── */}
-      {/* 2. MODAL: DIRECT PURCHASE TO WAREHOUSE (MULTI-ITEM)          */}
+      {/* 2. MODAL: DIRECT PURCHASE TO WAREHOUSE (SINGLE-ITEM)          */}
       {/* ───────────────────────────────────────────────────────────── */}
       {isWarehouseDirectPurchaseOpen && (
         <Modal
@@ -2541,122 +2287,135 @@ export function InventoryPage() {
           title={`Direct Purchase to ${activeLocation?.name || 'Warehouse'}`}
         >
           <form onSubmit={handleWarehouseDirectPurchaseSubmit} className="space-y-4 text-xs">
-            {/* Header: Items Manifest with + Add Item button */}
-            <div className="flex items-center justify-between pb-1 border-b border-slate-100">
-              <div>
-                <span className="font-bold text-slate-800 text-sm">
-                  Purchased Products {warehousePurchaseItems.length > 1 && `(${warehousePurchaseItems.length})`}
-                </span>
-                <p className="text-[11px] text-slate-500">
-                  Add one or more items to purchase and stock in this warehouse
-                </p>
-              </div>
-              <Button
+            {/* Mode Toggle: Existing Item vs + New Item */}
+            <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-xl border border-slate-200">
+              <button
                 type="button"
-                variant="outline"
-                size="sm"
-                onClick={handleAddWarehousePurchaseRow}
-                className="h-8 text-xs font-bold border-slate-300 text-slate-800 hover:bg-slate-100 flex items-center gap-1 shrink-0"
+                onClick={() => setIsWarehousePurchaseNewProduct(false)}
+                className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-colors touch-manipulation flex items-center justify-center gap-1.5 ${
+                  !isWarehousePurchaseNewProduct
+                    ? 'bg-white text-slate-900 shadow-2xs font-extrabold'
+                    : 'text-slate-500 hover:text-slate-800'
+                }`}
               >
-                <Plus className="w-3.5 h-3.5 text-slate-700" />
-                <span>+ Add Item</span>
-              </Button>
+                <Package className="w-3.5 h-3.5" />
+                <span>Existing Item</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsWarehousePurchaseNewProduct(true)}
+                className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-colors touch-manipulation flex items-center justify-center gap-1.5 ${
+                  isWarehousePurchaseNewProduct
+                    ? 'bg-white text-emerald-700 shadow-2xs font-extrabold'
+                    : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>+ New Item</span>
+              </button>
             </div>
 
-            {/* Multi-Item Rows */}
-            <div className="space-y-3 max-h-[320px] overflow-y-auto pr-0.5">
-              {warehousePurchaseItems.map((item, index) => {
-                const subtotal = (parseInt(item.quantity, 10) || 0) * (parseFloat(item.costPerUnit) || 0)
-                return (
-                  <div key={item.id} className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2 relative">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                        Item #{index + 1}
-                      </span>
-                      {warehousePurchaseItems.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveWarehousePurchaseRow(item.id)}
-                          className="text-red-500 hover:text-red-700 p-1 text-xs font-bold rounded hover:bg-red-50 transition-colors flex items-center gap-1 cursor-pointer"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                          <span>Remove</span>
-                        </button>
-                      )}
-                    </div>
-
-                    <div>
-                      <label className="block font-semibold text-slate-700 mb-1">Select Product *</label>
-                      <select
-                        value={item.productId}
-                        onChange={(e) => handleUpdateWarehousePurchaseRow(item.id, 'productId', e.target.value)}
-                        className="w-full p-2.5 bg-white border border-slate-300 rounded-xl min-h-[42px] font-bold text-xs"
-                      >
-                        <option value="">Choose a product...</option>
-                        {products.map(p => {
-                          const curStock = activeLocation?.stock?.[p.id] || 0
-                          return (
-                            <option key={p.id} value={p.id}>
-                              {p.name} (Current Stock: {curStock})
-                            </option>
-                          )
-                        })}
-                      </select>
-                    </div>
-
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-1 items-end">
-                      <div>
-                        <label className="block font-semibold text-slate-700 mb-1">Quantity *</label>
-                        <input
-                          type="number"
-                          min="1"
-                          required
-                          value={item.quantity}
-                          onChange={(e) => handleUpdateWarehousePurchaseRow(item.id, 'quantity', e.target.value)}
-                          className="w-full p-2 bg-white border border-slate-300 rounded-lg min-h-[40px] font-black text-slate-900 text-xs"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block font-semibold text-slate-700 mb-1">Cost / Unit (ETB) *</label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          required
-                          value={item.costPerUnit}
-                          onChange={(e) => handleUpdateWarehousePurchaseRow(item.id, 'costPerUnit', e.target.value)}
-                          className="w-full p-2 bg-white border border-slate-300 rounded-lg min-h-[40px] font-bold text-slate-800 text-xs"
-                        />
-                      </div>
-
-                      <div className="col-span-2 sm:col-span-1 p-2 bg-white border border-slate-200 rounded-lg flex flex-col justify-center min-h-[40px]">
-                        <span className="text-[10px] text-slate-400 font-semibold">Subtotal</span>
-                        <span className="font-black text-slate-900 text-xs">
-                          {formatCurrency(subtotal)}
-                        </span>
-                      </div>
-                    </div>
+            {!isWarehousePurchaseNewProduct ? (
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Select Product *</label>
+                <SearchableProductSelect
+                  value={warehouseDirectPurchaseForm.productId}
+                  onChange={(newId, prod) => {
+                    setWarehouseDirectPurchaseForm(prev => ({
+                      ...prev,
+                      productId: newId,
+                      costPerUnit: prod?.costPrice ? String(prod.costPrice) : prev.costPerUnit,
+                    }))
+                  }}
+                  products={products}
+                  warehouseStock={activeLocation?.stock || {}}
+                  stockLabel="in Wh"
+                  placeholder="Search and select product..."
+                />
+              </div>
+            ) : (
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2.5">
+                <p className="font-bold text-emerald-900 text-xs flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>New Product Details</span>
+                </p>
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-0.5">Product Name *</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. Merkato Cotton T-Shirts"
+                    value={warehouseDirectPurchaseForm.newProductName}
+                    onChange={(e) => setWarehouseDirectPurchaseForm(prev => ({ ...prev, newProductName: e.target.value }))}
+                    className="w-full p-2 bg-white border border-slate-300 rounded-lg font-bold text-xs"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-0.5">Category</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Apparel, Hardware"
+                      value={warehouseDirectPurchaseForm.newProductCategory}
+                      onChange={(e) => setWarehouseDirectPurchaseForm(prev => ({ ...prev, newProductCategory: e.target.value }))}
+                      className="w-full p-2 bg-white border border-slate-300 rounded-lg text-xs"
+                    />
                   </div>
-                )
-              })}
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-0.5">Retail Selling Price (ETB) *</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      required
+                      value={warehouseDirectPurchaseForm.newProductSellingPrice}
+                      onChange={(e) => setWarehouseDirectPurchaseForm(prev => ({ ...prev, newProductSellingPrice: e.target.value }))}
+                      className="w-full p-2 bg-white border border-slate-300 rounded-lg text-xs font-bold text-emerald-700"
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-3 pt-1">
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Quantity *</label>
+                <input
+                  type="number"
+                  min="1"
+                  required
+                  value={warehouseDirectPurchaseForm.quantity}
+                  onChange={(e) => setWarehouseDirectPurchaseForm(prev => ({ ...prev, quantity: e.target.value }))}
+                  className="w-full p-2.5 bg-white border border-slate-300 rounded-xl min-h-[44px] font-black text-slate-900 text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Cost / Unit (ETB) *</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  required
+                  value={warehouseDirectPurchaseForm.costPerUnit}
+                  onChange={(e) => setWarehouseDirectPurchaseForm(prev => ({ ...prev, costPerUnit: e.target.value }))}
+                  className="w-full p-2.5 bg-white border border-slate-300 rounded-xl min-h-[44px] font-bold text-slate-800 text-sm"
+                />
+              </div>
             </div>
 
             {/* Total Cost Display */}
             {(() => {
-              const totalCost = warehousePurchaseItems.reduce((acc, it) => {
-                const q = parseInt(it.quantity, 10) || 0
-                const c = parseFloat(it.costPerUnit) || 0
-                return acc + (q * c)
-              }, 0)
-              const totalUnits = warehousePurchaseItems.reduce((acc, it) => acc + (parseInt(it.quantity, 10) || 0), 0)
+              const q = parseInt(warehouseDirectPurchaseForm.quantity, 10) || 0
+              const c = parseFloat(warehouseDirectPurchaseForm.costPerUnit) || 0
+              const totalCost = q * c
 
               return (
                 <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center justify-between">
                   <div>
                     <span className="text-emerald-800 font-bold text-xs block">Total Purchase Cost</span>
                     <span className="text-[11px] text-emerald-600 font-medium">
-                      {warehousePurchaseItems.length} item{warehousePurchaseItems.length > 1 ? 's' : ''} • {totalUnits} total units
+                      {q} unit(s)
                     </span>
                   </div>
                   <span className="text-base font-black text-emerald-950">
@@ -2807,128 +2566,57 @@ export function InventoryPage() {
                   <optgroup label="Warehouses">
                     {warehouses.filter(w => w.id !== activeLocation?.id).map(w => (
                       <option key={w.id} value={`wh-${w.id}`}>
-                        Warehouse: {w.name} ({w.location})
+                        {w.name}{w.location && w.location !== w.name ? ` (${w.location})` : ''}
                       </option>
                     ))}
                   </optgroup>
                 )}
-                <optgroup label="Retail Stores">
+                <optgroup label="Stores">
                   {stores.map(s => (
                     <option key={s.id} value={`st-${s.id}`}>
-                      Retail Store: {s.name} ({s.location})
+                      {s.name}{s.location && s.location !== s.name ? ` (${s.location})` : ''}
                     </option>
                   ))}
                 </optgroup>
               </select>
             </div>
 
-            {/* Header: Items Manifest with + Add Item button */}
-            <div className="flex items-center justify-between pb-1 border-b border-slate-100">
-              <div>
-                <span className="font-bold text-slate-800 text-sm">
-                  Items to Transfer {warehouseTransferItems.length > 1 && `(${warehouseTransferItems.length})`}
-                </span>
-                <p className="text-[11px] text-slate-500">
-                  Transfer one or multiple products to the chosen destination
-                </p>
-              </div>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={handleAddWarehouseTransferRow}
-                className="h-8 text-xs font-bold border-slate-300 text-slate-800 hover:bg-slate-100 flex items-center gap-1 shrink-0"
-              >
-                <Plus className="w-3.5 h-3.5 text-slate-700" />
-                <span>+ Add Item</span>
-              </Button>
+            {/* Single Product Selector */}
+            <div>
+              <label className="block font-bold text-slate-700 mb-1">Select Product *</label>
+              <SearchableProductSelect
+                value={warehouseTransferForm.productId}
+                onChange={(newId) => setWarehouseTransferForm(prev => ({ ...prev, productId: newId }))}
+                products={products}
+                warehouseStock={activeLocation?.stock || {}}
+                placeholder="Search & choose a product to transfer..."
+              />
             </div>
 
-            {/* Multi-Item Transfer Rows */}
-            <div className="space-y-3 max-h-[320px] overflow-y-auto pr-0.5">
-              {warehouseTransferItems.map((item, index) => {
-                const available = activeLocation?.stock?.[item.productId] || 0
-                const qtyNum = parseInt(item.quantity, 10) || 0
-                const isOverLimit = qtyNum > available
-
-                return (
-                  <div key={item.id} className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2 relative">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                        Item #{index + 1}
-                      </span>
-                      {warehouseTransferItems.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveWarehouseTransferRow(item.id)}
-                          className="text-red-500 hover:text-red-700 p-1 text-xs font-bold rounded hover:bg-red-50 transition-colors flex items-center gap-1 cursor-pointer"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                          <span>Remove</span>
-                        </button>
-                      )}
-                    </div>
-
-                    <div>
-                      <div className="flex items-center justify-between mb-1">
-                        <label className="font-semibold text-slate-700">Select Product *</label>
-                        <span className={`text-[11px] font-bold ${available > 0 ? 'text-emerald-700' : 'text-rose-600'}`}>
-                          Available: {available} units
-                        </span>
-                      </div>
-                      <select
-                        value={item.productId}
-                        onChange={(e) => handleUpdateWarehouseTransferRow(item.id, 'productId', e.target.value)}
-                        className="w-full p-2.5 bg-white border border-slate-300 rounded-xl min-h-[42px] font-bold text-xs"
-                      >
-                        <option value="">Choose a product...</option>
-                        {products.map(p => {
-                          const pAvail = activeLocation?.stock?.[p.id] || 0
-                          return (
-                            <option key={p.id} value={p.id}>
-                              {p.name} ({pAvail} in stock)
-                            </option>
-                          )
-                        })}
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block font-semibold text-slate-700 mb-1">Transfer Quantity *</label>
-                      <input
-                        type="number"
-                        min="1"
-                        max={available || 1}
-                        required
-                        value={item.quantity}
-                        onChange={(e) => handleUpdateWarehouseTransferRow(item.id, 'quantity', e.target.value)}
-                        className={`w-full p-2.5 bg-white border rounded-xl min-h-[42px] font-black text-slate-900 text-sm ${
-                          isOverLimit ? 'border-rose-500 bg-rose-50 text-rose-900' : 'border-slate-300'
-                        }`}
-                      />
-                      {isOverLimit && (
-                        <p className="text-[11px] text-rose-600 font-bold mt-1">
-                          Exceeds available stock ({available})
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                )
-              })}
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">Transfer Quantity *</label>
+              <input
+                type="number"
+                min="1"
+                max={activeLocation?.stock?.[warehouseTransferForm.productId] || 1}
+                required
+                value={warehouseTransferForm.quantity}
+                onChange={(e) => setWarehouseTransferForm(prev => ({ ...prev, quantity: e.target.value }))}
+                className="w-full p-2.5 bg-white border border-slate-300 rounded-xl min-h-[44px] font-black text-slate-900 text-sm"
+              />
+              {(() => {
+                const avail = activeLocation?.stock?.[warehouseTransferForm.productId] || 0
+                const qtyNum = parseInt(warehouseTransferForm.quantity, 10) || 0
+                if (qtyNum > avail) {
+                  return (
+                    <p className="text-[11px] text-rose-600 font-bold mt-1">
+                      Exceeds available stock ({avail})
+                    </p>
+                  )
+                }
+                return null
+              })()}
             </div>
-
-            {/* Total Transfer Summary */}
-            {(() => {
-              const totalUnits = warehouseTransferItems.reduce((acc, it) => acc + (parseInt(it.quantity, 10) || 0), 0)
-              return (
-                <div className="p-3 bg-purple-50 border border-purple-200 rounded-xl flex items-center justify-between">
-                  <span className="text-purple-900 font-bold text-xs">Total Units to Transfer:</span>
-                  <span className="text-sm font-black text-purple-950">
-                    {totalUnits} units across {warehouseTransferItems.length} product{warehouseTransferItems.length > 1 ? 's' : ''}
-                  </span>
-                </div>
-              )
-            })()}
 
             <div className="pt-2 flex flex-col-reverse sm:flex-row justify-end gap-2">
               <Button
@@ -3079,122 +2767,135 @@ export function InventoryPage() {
           title={`Direct Purchase to ${activeLocation?.name || 'Store'}`}
         >
           <form onSubmit={handleStoreDirectPurchaseSubmit} className="space-y-4 text-xs">
-            {/* Header: Items Manifest with + Add Item button */}
-            <div className="flex items-center justify-between pb-1 border-b border-slate-100">
-              <div>
-                <span className="font-bold text-slate-800 text-sm">
-                  Purchased Products {storePurchaseItems.length > 1 && `(${storePurchaseItems.length})`}
-                </span>
-                <p className="text-[11px] text-slate-500">
-                  Add one or more items to purchase directly into this store
-                </p>
-              </div>
-              <Button
+            {/* Mode Toggle: Existing Item vs + New Item */}
+            <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-xl border border-slate-200">
+              <button
                 type="button"
-                variant="outline"
-                size="sm"
-                onClick={handleAddStorePurchaseRow}
-                className="h-8 text-xs font-bold border-slate-300 text-slate-800 hover:bg-slate-100 flex items-center gap-1 shrink-0"
+                onClick={() => setIsStorePurchaseNewProduct(false)}
+                className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-colors touch-manipulation flex items-center justify-center gap-1.5 ${
+                  !isStorePurchaseNewProduct
+                    ? 'bg-white text-slate-900 shadow-2xs font-extrabold'
+                    : 'text-slate-500 hover:text-slate-800'
+                }`}
               >
-                <Plus className="w-3.5 h-3.5 text-slate-700" />
-                <span>+ Add Item</span>
-              </Button>
+                <Package className="w-3.5 h-3.5" />
+                <span>Existing Item</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsStorePurchaseNewProduct(true)}
+                className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-colors touch-manipulation flex items-center justify-center gap-1.5 ${
+                  isStorePurchaseNewProduct
+                    ? 'bg-white text-emerald-700 shadow-2xs font-extrabold'
+                    : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>+ New Item</span>
+              </button>
             </div>
 
-            {/* Multi-Item Rows */}
-            <div className="space-y-3 max-h-[320px] overflow-y-auto pr-0.5">
-              {storePurchaseItems.map((item, index) => {
-                const subtotal = (parseInt(item.quantity, 10) || 0) * (parseFloat(item.costPerUnit) || 0)
-                return (
-                  <div key={item.id} className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2 relative">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                        Item #{index + 1}
-                      </span>
-                      {storePurchaseItems.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveStorePurchaseRow(item.id)}
-                          className="text-red-500 hover:text-red-700 p-1 text-xs font-bold rounded hover:bg-red-50 transition-colors flex items-center gap-1 cursor-pointer"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                          <span>Remove</span>
-                        </button>
-                      )}
-                    </div>
-
-                    <div>
-                      <label className="block font-semibold text-slate-700 mb-1">Select Product *</label>
-                      <select
-                        value={item.productId}
-                        onChange={(e) => handleUpdateStorePurchaseRow(item.id, 'productId', e.target.value)}
-                        className="w-full p-2.5 bg-white border border-slate-300 rounded-xl min-h-[42px] font-bold text-xs"
-                      >
-                        <option value="">Choose a product...</option>
-                        {products.map(p => {
-                          const curStock = activeLocation?.stock?.[p.id] || 0
-                          return (
-                            <option key={p.id} value={p.id}>
-                              {p.name} (Current Stock: {curStock})
-                            </option>
-                          )
-                        })}
-                      </select>
-                    </div>
-
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-1 items-end">
-                      <div>
-                        <label className="block font-semibold text-slate-700 mb-1">Quantity *</label>
-                        <input
-                          type="number"
-                          min="1"
-                          required
-                          value={item.quantity}
-                          onChange={(e) => handleUpdateStorePurchaseRow(item.id, 'quantity', e.target.value)}
-                          className="w-full p-2 bg-white border border-slate-300 rounded-lg min-h-[40px] font-black text-slate-900 text-xs"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block font-semibold text-slate-700 mb-1">Cost / Unit (ETB) *</label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          required
-                          value={item.costPerUnit}
-                          onChange={(e) => handleUpdateStorePurchaseRow(item.id, 'costPerUnit', e.target.value)}
-                          className="w-full p-2 bg-white border border-slate-300 rounded-lg min-h-[40px] font-bold text-slate-800 text-xs"
-                        />
-                      </div>
-
-                      <div className="col-span-2 sm:col-span-1 p-2 bg-white border border-slate-200 rounded-lg flex flex-col justify-center min-h-[40px]">
-                        <span className="text-[10px] text-slate-400 font-semibold">Subtotal</span>
-                        <span className="font-black text-slate-900 text-xs">
-                          {formatCurrency(subtotal)}
-                        </span>
-                      </div>
-                    </div>
+            {!isStorePurchaseNewProduct ? (
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Select Product *</label>
+                <SearchableProductSelect
+                  value={storeDirectPurchaseForm.productId}
+                  onChange={(newId, prod) => {
+                    setStoreDirectPurchaseForm(prev => ({
+                      ...prev,
+                      productId: newId,
+                      costPerUnit: prod?.costPrice ? String(prod.costPrice) : prev.costPerUnit,
+                    }))
+                  }}
+                  products={products}
+                  warehouseStock={activeLocation?.stock || {}}
+                  stockLabel="in Store"
+                  placeholder="Search and select product..."
+                />
+              </div>
+            ) : (
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2.5">
+                <p className="font-bold text-emerald-900 text-xs flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>New Product Details</span>
+                </p>
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-0.5">Product Name *</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. Merkato Cotton T-Shirts"
+                    value={storeDirectPurchaseForm.newProductName}
+                    onChange={(e) => setStoreDirectPurchaseForm(prev => ({ ...prev, newProductName: e.target.value }))}
+                    className="w-full p-2 bg-white border border-slate-300 rounded-lg font-bold text-xs"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-0.5">Category</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Apparel, Hardware"
+                      value={storeDirectPurchaseForm.newProductCategory}
+                      onChange={(e) => setStoreDirectPurchaseForm(prev => ({ ...prev, newProductCategory: e.target.value }))}
+                      className="w-full p-2 bg-white border border-slate-300 rounded-lg text-xs"
+                    />
                   </div>
-                )
-              })}
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-0.5">Retail Selling Price (ETB) *</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      required
+                      value={storeDirectPurchaseForm.newProductSellingPrice}
+                      onChange={(e) => setStoreDirectPurchaseForm(prev => ({ ...prev, newProductSellingPrice: e.target.value }))}
+                      className="w-full p-2 bg-white border border-slate-300 rounded-lg text-xs font-bold text-emerald-700"
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-3 pt-1">
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Quantity *</label>
+                <input
+                  type="number"
+                  min="1"
+                  required
+                  value={storeDirectPurchaseForm.quantity}
+                  onChange={(e) => setStoreDirectPurchaseForm(prev => ({ ...prev, quantity: e.target.value }))}
+                  className="w-full p-2.5 bg-white border border-slate-300 rounded-xl min-h-[44px] font-black text-slate-900 text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Cost / Unit (ETB) *</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  required
+                  value={storeDirectPurchaseForm.costPerUnit}
+                  onChange={(e) => setStoreDirectPurchaseForm(prev => ({ ...prev, costPerUnit: e.target.value }))}
+                  className="w-full p-2.5 bg-white border border-slate-300 rounded-xl min-h-[44px] font-bold text-slate-800 text-sm"
+                />
+              </div>
             </div>
 
             {/* Total Cost Display */}
             {(() => {
-              const totalCost = storePurchaseItems.reduce((acc, it) => {
-                const q = parseInt(it.quantity, 10) || 0
-                const c = parseFloat(it.costPerUnit) || 0
-                return acc + (q * c)
-              }, 0)
-              const totalUnits = storePurchaseItems.reduce((acc, it) => acc + (parseInt(it.quantity, 10) || 0), 0)
+              const q = parseInt(storeDirectPurchaseForm.quantity, 10) || 0
+              const c = parseFloat(storeDirectPurchaseForm.costPerUnit) || 0
+              const totalCost = q * c
 
               return (
                 <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center justify-between">
                   <div>
                     <span className="text-emerald-800 font-bold text-xs block">Total Purchase Cost</span>
                     <span className="text-[11px] text-emerald-600 font-medium">
-                      {storePurchaseItems.length} item{storePurchaseItems.length > 1 ? 's' : ''} • {totalUnits} total units
+                      {q} unit(s)
                     </span>
                   </div>
                   <span className="text-base font-black text-emerald-950">
@@ -3345,128 +3046,58 @@ export function InventoryPage() {
                   <optgroup label="Warehouses">
                     {warehouses.map(w => (
                       <option key={w.id} value={`wh-${w.id}`}>
-                        Warehouse: {w.name} ({w.location})
+                        {w.name}{w.location && w.location !== w.name ? ` (${w.location})` : ''}
                       </option>
                     ))}
                   </optgroup>
                 )}
-                <optgroup label="Retail Stores">
+                <optgroup label="Stores">
                   {stores.filter(s => s.id !== activeLocation?.id).map(s => (
                     <option key={s.id} value={`st-${s.id}`}>
-                      Store: {s.name} ({s.location})
+                      {s.name}{s.location && s.location !== s.name ? ` (${s.location})` : ''}
                     </option>
                   ))}
                 </optgroup>
               </select>
             </div>
 
-            {/* Header: Items Manifest with + Add Item button */}
-            <div className="flex items-center justify-between pb-1 border-b border-slate-100">
-              <div>
-                <span className="font-bold text-slate-800 text-sm">
-                  Items to Transfer {storeTransferItems.length > 1 && `(${storeTransferItems.length})`}
-                </span>
-                <p className="text-[11px] text-slate-500">
-                  Transfer one or multiple products to the chosen destination
-                </p>
-              </div>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={handleAddStoreTransferRow}
-                className="h-8 text-xs font-bold border-slate-300 text-slate-800 hover:bg-slate-100 flex items-center gap-1 shrink-0"
-              >
-                <Plus className="w-3.5 h-3.5 text-slate-700" />
-                <span>+ Add Item</span>
-              </Button>
+            {/* Single Product Selector */}
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">Select Product *</label>
+              <SearchableProductSelect
+                value={storeTransferForm.productId}
+                onChange={(newId) => setStoreTransferForm(prev => ({ ...prev, productId: newId }))}
+                products={products}
+                warehouseStock={activeLocation?.stock || {}}
+                stockLabel="available"
+                placeholder="Search product to transfer..."
+              />
             </div>
 
-            {/* Multi-Item Transfer Rows */}
-            <div className="space-y-3 max-h-[320px] overflow-y-auto pr-0.5">
-              {storeTransferItems.map((item, index) => {
-                const available = activeLocation?.stock?.[item.productId] || 0
-                const qtyNum = parseInt(item.quantity, 10) || 0
-                const isOverLimit = qtyNum > available
-
-                return (
-                  <div key={item.id} className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2 relative">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                        Item #{index + 1}
-                      </span>
-                      {storeTransferItems.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveStoreTransferRow(item.id)}
-                          className="text-red-500 hover:text-red-700 p-1 text-xs font-bold rounded hover:bg-red-50 transition-colors flex items-center gap-1 cursor-pointer"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                          <span>Remove</span>
-                        </button>
-                      )}
-                    </div>
-
-                    <div>
-                      <div className="flex items-center justify-between mb-1">
-                        <label className="font-semibold text-slate-700">Select Product *</label>
-                        <span className={`text-[11px] font-bold ${available > 0 ? 'text-emerald-700' : 'text-rose-600'}`}>
-                          Available: {available} units
-                        </span>
-                      </div>
-                      <select
-                        value={item.productId}
-                        onChange={(e) => handleUpdateStoreTransferRow(item.id, 'productId', e.target.value)}
-                        className="w-full p-2.5 bg-white border border-slate-300 rounded-xl min-h-[42px] font-bold text-xs"
-                      >
-                        <option value="">Choose a product...</option>
-                        {products.map(p => {
-                          const pAvail = activeLocation?.stock?.[p.id] || 0
-                          return (
-                            <option key={p.id} value={p.id}>
-                              {p.name} ({pAvail} in stock)
-                            </option>
-                          )
-                        })}
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block font-semibold text-slate-700 mb-1">Transfer Quantity *</label>
-                      <input
-                        type="number"
-                        min="1"
-                        max={available || 1}
-                        required
-                        value={item.quantity}
-                        onChange={(e) => handleUpdateStoreTransferRow(item.id, 'quantity', e.target.value)}
-                        className={`w-full p-2.5 bg-white border rounded-xl min-h-[42px] font-black text-slate-900 text-sm ${
-                          isOverLimit ? 'border-rose-500 bg-rose-50 text-rose-900' : 'border-slate-300'
-                        }`}
-                      />
-                      {isOverLimit && (
-                        <p className="text-[11px] text-rose-600 font-bold mt-1">
-                          Exceeds available stock ({available})
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                )
-              })}
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1">Transfer Quantity *</label>
+              <input
+                type="number"
+                min="1"
+                max={activeLocation?.stock?.[storeTransferForm.productId] || 1}
+                required
+                value={storeTransferForm.quantity}
+                onChange={(e) => setStoreTransferForm(prev => ({ ...prev, quantity: e.target.value }))}
+                className="w-full p-2.5 bg-white border border-slate-300 rounded-xl min-h-[44px] font-black text-slate-900 text-sm"
+              />
+              {(() => {
+                const avail = activeLocation?.stock?.[storeTransferForm.productId] || 0
+                const qtyNum = parseInt(storeTransferForm.quantity, 10) || 0
+                if (qtyNum > avail) {
+                  return (
+                    <p className="text-[11px] text-rose-600 font-bold mt-1">
+                      Exceeds available stock ({avail})
+                    </p>
+                  )
+                }
+                return null
+              })()}
             </div>
-
-            {/* Total Transfer Summary */}
-            {(() => {
-              const totalUnits = storeTransferItems.reduce((acc, it) => acc + (parseInt(it.quantity, 10) || 0), 0)
-              return (
-                <div className="p-3 bg-purple-50 border border-purple-200 rounded-xl flex items-center justify-between">
-                  <span className="text-purple-900 font-bold text-xs">Total Units to Transfer:</span>
-                  <span className="text-sm font-black text-purple-950">
-                    {totalUnits} units across {storeTransferItems.length} product{storeTransferItems.length > 1 ? 's' : ''}
-                  </span>
-                </div>
-              )
-            })()}
 
             <div className="pt-2 flex flex-col-reverse sm:flex-row justify-end gap-2">
               <Button
@@ -3492,167 +3123,192 @@ export function InventoryPage() {
       )}
 
       {/* ========================================================================= */}
-      {/* 3. STOCK TRANSFER SLIDE-UP MODAL (SEARCHABLE) */}
+      {/* 3. STOCK TRANSFER MODAL (SINGLE PRODUCT AT A TIME, CLEAN & SIMPLE UI) */}
       {/* ========================================================================= */}
-      {isTransferModalOpen && (
-        <Modal
-          isOpen={isTransferModalOpen}
-          onClose={() => setIsTransferModalOpen(false)}
-          title="Transfer Stock from Warehouse"
-        >
-          <form onSubmit={handleTransferSubmit} className="space-y-3.5 text-xs">
-            <div>
-              <label className="block font-bold text-slate-700 mb-1">From Warehouse:</label>
-              <select
-                value={transferForm.fromWarehouseId}
-                onChange={(e) => setTransferForm({ ...transferForm, fromWarehouseId: e.target.value })}
-                className="w-full p-2.5 bg-white border border-slate-300 rounded-xl min-h-[44px] font-bold"
-              >
-                {warehouses.map(w => (
-                  <option key={w.id} value={w.id}>{w.name} ({w.location})</option>
-                ))}
-              </select>
-            </div>
+      {isTransferModalOpen && (() => {
+        const currentWh = warehouses.find(w => w.id === transferForm.fromWarehouseId)
+        const availableQty = currentWh?.stock?.[transferForm.productId] || 0
+        const qtyNum = parseInt(transferForm.quantity, 10) || 0
+        const isOverLimit = qtyNum > availableQty
+        const selectedProd = products.find(p => p.id === transferForm.productId)
 
-            <div>
-              <label className="block font-bold text-slate-700 mb-1">Destination Retail Store:</label>
-              <select
-                value={transferForm.toStoreId}
-                onChange={(e) => setTransferForm({ ...transferForm, toStoreId: e.target.value })}
-                className="w-full p-2.5 bg-white border border-slate-300 rounded-xl min-h-[44px] font-bold"
-              >
-                {stores.map(s => (
-                  <option key={s.id} value={s.id}>{s.name} ({s.location})</option>
-                ))}
-              </select>
-            </div>
-
-            {/* Items Manifest Header with prominent "+ Add Item" on top */}
-            <div className="flex items-center justify-between pt-1">
-              <div>
-                <span className="font-bold text-slate-800 text-xs">
-                  Items to Transfer {transferItems.length > 1 && `(${transferItems.length})`}
-                </span>
-                <p className="text-[10px] text-slate-500">
-                  {transferItems.length === 1
-                    ? 'Default single product transfer'
-                    : `Multi-item dispatch (${transferItems.reduce((acc, it) => acc + (parseInt(it.quantity, 10) || 0), 0)} units total)`}
-                </p>
-              </div>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={handleAddTransferItem}
-                className="h-8 text-xs font-bold border-slate-300 text-slate-800 hover:bg-slate-100 flex items-center gap-1 shadow-2xs"
-              >
-                <Plus className="w-3.5 h-3.5 text-slate-700" />
-                <span>+ Add Item</span>
-              </Button>
-            </div>
-
-            {/* Items List */}
-            <div className="space-y-2.5 max-h-[320px] overflow-y-auto pr-0.5">
-              {transferItems.map((item, index) => {
-                const currentWh = warehouses.find(w => w.id === transferForm.fromWarehouseId)
-                const availableQty = currentWh?.stock[item.productId] || 0
-                const qtyNum = parseInt(item.quantity, 10) || 0
-                const isOverLimit = qtyNum > availableQty
-
-                return (
-                  <div key={item.id} className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2 relative">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                        Item #{index + 1}
-                      </span>
-                      {transferItems.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveTransferItem(item.id)}
-                          className="text-red-500 hover:text-red-700 p-1 rounded-lg hover:bg-red-50 transition-colors"
-                          title="Remove item"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                    </div>
-
-                    <div>
-                      <label className="block text-[11px] font-semibold text-slate-700 mb-0.5">Product</label>
-                      <select
-                        value={item.productId}
-                        onChange={(e) => handleUpdateTransferItem(item.id, 'productId', e.target.value)}
-                        className="w-full p-2 bg-white border border-slate-300 rounded-lg text-xs font-bold min-h-[38px]"
-                      >
-                        {products.map(p => {
-                          const whStock = currentWh?.stock[p.id] || 0
-                          return (
-                            <option key={p.id} value={p.id}>
-                              {p.name} (Wh Available: {whStock})
-                            </option>
-                          )
-                        })}
-                      </select>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2 items-center">
-                      <div>
-                        <label className="block text-[10px] font-semibold text-slate-700 mb-0.5">Quantity to Dispatch</label>
-                        <input
-                          type="number"
-                          min="1"
-                          max={availableQty}
-                          required
-                          value={item.quantity}
-                          onChange={(e) => handleUpdateTransferItem(item.id, 'quantity', e.target.value)}
-                          className={`w-full p-2 bg-white border rounded-lg text-xs font-bold ${
-                            isOverLimit ? 'border-red-400 text-red-600 bg-red-50/50' : 'border-slate-300 text-slate-900'
-                          }`}
-                        />
-                      </div>
-                      <div className="text-right">
-                        <span className="block text-[10px] text-slate-400">Warehouse Available</span>
-                        <span className={`text-xs font-bold ${availableQty === 0 ? 'text-red-600' : 'text-slate-700'}`}>
-                          {availableQty} units
-                        </span>
-                      </div>
-                    </div>
-
-                    {isOverLimit && (
-                      <p className="text-[10px] text-red-600 font-semibold">
-                        ⚠️ Exceeds warehouse stock of {availableQty} units.
-                      </p>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
-
-            {/* Total Summary Footer if multiple items */}
-            {transferItems.length > 1 && (
-              <div className="p-3 bg-slate-100 border border-slate-200 rounded-xl flex items-center justify-between text-xs">
+        return (
+          <Modal
+            isOpen={isTransferModalOpen}
+            onClose={() => setIsTransferModalOpen(false)}
+            title="Transfer Stock to Store"
+          >
+            <form onSubmit={handleTransferSubmit} className="space-y-4 text-xs">
+              {/* Route Card (From Warehouse -> Destination Store) */}
+              <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-3 sm:p-3.5 space-y-2.5">
                 <div>
-                  <span className="block text-[11px] font-medium text-slate-600">Total Dispatch Manifest:</span>
-                  <span className="font-bold text-slate-900">
-                    {transferItems.length} Products &bull; {transferItems.reduce((acc, it) => acc + (parseInt(it.quantity, 10) || 0), 0)} Total Units
-                  </span>
+                  <label className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 mb-1 flex items-center gap-1.5">
+                    <Warehouse className="w-3.5 h-3.5 text-purple-600" />
+                    <span>From Warehouse (Source)</span>
+                  </label>
+                  <select
+                    value={transferForm.fromWarehouseId}
+                    onChange={(e) => setTransferForm({ ...transferForm, fromWarehouseId: e.target.value })}
+                    className="w-full p-2.5 bg-white border border-slate-200 rounded-xl min-h-[42px] font-bold text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900/10 cursor-pointer shadow-2xs"
+                  >
+                    {warehouses.map(w => (
+                      <option key={w.id} value={w.id}>{w.name} ({w.location})</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex items-center gap-2 text-slate-300">
+                  <div className="flex-1 border-t border-slate-200 border-dashed" />
+                  <div className="w-6 h-6 rounded-full bg-white border border-slate-200 flex items-center justify-center text-slate-400 shrink-0 shadow-2xs">
+                    <ArrowDown className="w-3 h-3 text-slate-500" />
+                  </div>
+                  <div className="flex-1 border-t border-slate-200 border-dashed" />
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 mb-1 flex items-center gap-1.5">
+                    <Store className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Destination Retail Store (Target)</span>
+                  </label>
+                  <select
+                    value={transferForm.toStoreId}
+                    onChange={(e) => setTransferForm({ ...transferForm, toStoreId: e.target.value })}
+                    className="w-full p-2.5 bg-white border border-slate-200 rounded-xl min-h-[42px] font-bold text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-900/10 cursor-pointer shadow-2xs"
+                  >
+                    {stores.map(s => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}{s.location && s.location !== s.name ? ` (${s.location})` : ''}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               </div>
-            )}
 
-            <div className="pt-2 flex flex-col-reverse sm:flex-row justify-end gap-2">
-              <Button variant="ghost" size="md" type="button" onClick={() => setIsTransferModalOpen(false)} className="w-full sm:w-auto min-h-[44px]">
-                Cancel
-              </Button>
-              <Button variant="primary" size="md" type="submit" className="w-full sm:w-auto font-bold min-h-[44px] bg-slate-900 hover:bg-slate-800 text-white shadow-sm">
-                {transferItems.length > 1
-                  ? `Bulk Transfer (${transferItems.reduce((acc, it) => acc + (parseInt(it.quantity, 10) || 0), 0)} units)`
-                  : 'Transfer Stock'}
-              </Button>
-            </div>
-          </form>
-        </Modal>
-      )}
+              {/* Single Product Selector */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                    <Package className="w-3.5 h-3.5 text-slate-500" />
+                    <span>Product to Transfer</span>
+                  </label>
+                  {selectedProd && (
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                      availableQty > 0 
+                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200' 
+                        : 'bg-rose-50 text-rose-600 border-rose-200'
+                    }`}>
+                      {availableQty} units in warehouse
+                    </span>
+                  )}
+                </div>
+                <SearchableProductSelect
+                  value={transferForm.productId}
+                  onChange={(newId) => setTransferForm(prev => ({ ...prev, productId: newId }))}
+                  products={products}
+                  warehouseStock={currentWh?.stock || {}}
+                />
+              </div>
+
+              {/* Quantity to Dispatch with Stepper Buttons */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs font-bold text-slate-800">
+                    Quantity to Dispatch
+                  </label>
+                  <span className="text-[10px] text-slate-400">
+                    Available: <strong className="text-slate-700">{availableQty}</strong>
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const cur = parseInt(transferForm.quantity, 10) || 0
+                      if (cur > 1) setTransferForm(prev => ({ ...prev, quantity: String(cur - 1) }))
+                    }}
+                    disabled={qtyNum <= 1}
+                    className="w-11 h-11 rounded-xl border border-slate-200 bg-white hover:bg-slate-100 disabled:opacity-40 flex items-center justify-center text-slate-700 font-bold transition-all cursor-pointer shrink-0 shadow-2xs"
+                  >
+                    <Minus className="w-4 h-4" />
+                  </button>
+
+                  <input
+                    type="number"
+                    min="1"
+                    max={availableQty}
+                    required
+                    value={transferForm.quantity}
+                    onChange={(e) => setTransferForm(prev => ({ ...prev, quantity: e.target.value }))}
+                    className={`flex-1 h-11 px-3 bg-white border rounded-xl text-center text-base font-black transition-all ${
+                      isOverLimit
+                        ? 'border-rose-400 text-rose-600 bg-rose-50/50 ring-2 ring-rose-200'
+                        : 'border-slate-200 text-slate-900 focus:border-slate-900 focus:ring-1 focus:ring-slate-900'
+                    }`}
+                  />
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const cur = parseInt(transferForm.quantity, 10) || 0
+                      if (cur < availableQty) setTransferForm(prev => ({ ...prev, quantity: String(cur + 1) }))
+                    }}
+                    disabled={qtyNum >= availableQty}
+                    className="w-11 h-11 rounded-xl border border-slate-200 bg-white hover:bg-slate-100 disabled:opacity-40 flex items-center justify-center text-slate-700 font-bold transition-all cursor-pointer shrink-0 shadow-2xs"
+                  >
+                    <Plus className="w-4 h-4" />
+                  </button>
+
+                  {availableQty > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setTransferForm(prev => ({ ...prev, quantity: String(availableQty) }))}
+                      className="h-11 px-3.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-100 text-slate-800 text-xs font-bold transition-all cursor-pointer shrink-0 shadow-2xs"
+                      title="Set to max available warehouse stock"
+                    >
+                      Max ({availableQty})
+                    </button>
+                  )}
+                </div>
+
+                {isOverLimit && (
+                  <p className="text-[11px] text-rose-600 font-semibold mt-1.5 flex items-center gap-1">
+                    <AlertTriangle className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+                    Exceeds available warehouse stock of {availableQty} units.
+                  </p>
+                )}
+              </div>
+
+              {/* Action Buttons */}
+              <div className="pt-2 flex flex-col-reverse sm:flex-row justify-end gap-2">
+                <Button
+                  variant="ghost"
+                  size="md"
+                  type="button"
+                  onClick={() => setIsTransferModalOpen(false)}
+                  className="w-full sm:w-auto min-h-[44px] rounded-xl"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  variant="primary"
+                  size="md"
+                  type="submit"
+                  disabled={qtyNum <= 0 || isOverLimit || availableQty === 0}
+                  className="w-full sm:w-auto font-bold min-h-[46px] bg-slate-900 hover:bg-slate-800 text-white shadow-sm rounded-xl flex items-center justify-center gap-2 disabled:opacity-50"
+                >
+                  <ArrowRightLeft className="w-4 h-4" />
+                  <span>
+                    {qtyNum > 0 && !isOverLimit
+                      ? `Transfer ${qtyNum} Units`
+                      : 'Transfer Stock'}
+                  </span>
+                </Button>
+              </div>
+            </form>
+          </Modal>
+        )
+      })()}
 
       {/* ========================================================================= */}
       {/* 4. DIRECT STORE PURCHASE MODAL */}
@@ -3819,17 +3475,15 @@ export function InventoryPage() {
                         ) : (
                           <div>
                             <label className="block text-[11px] font-semibold text-slate-700 mb-0.5">Product</label>
-                            <select
+                            <SearchableProductSelect
                               value={item.productId}
-                              onChange={(e) => handleUpdateBulkPurchaseRow(item.id, 'productId', e.target.value)}
-                              className="w-full p-2 bg-white border border-slate-300 rounded-lg text-xs font-bold min-h-[38px]"
-                            >
-                              {products.map(p => (
-                                <option key={p.id} value={p.id}>
-                                  {p.name} (Current Cost: {formatCurrency(p.costPrice)})
-                                </option>
-                              ))}
-                            </select>
+                              onChange={(newId) => handleUpdateBulkPurchaseRow(item.id, 'productId', newId)}
+                              products={products}
+                              showStock={false}
+                              showCost={true}
+                              compact={true}
+                              placeholder="Search product..."
+                            />
                           </div>
                         )}
 
@@ -3918,34 +3572,21 @@ export function InventoryPage() {
 
                 {!isPurchaseCreatingNewProduct ? (
                   <div>
-                    <label className="block font-bold text-slate-700 mb-1">Select Product:</label>
-                    <input
-                      type="text"
-                      placeholder="Search product..."
-                      value={purchaseProductSearch}
-                      onChange={(e) => setPurchaseProductSearch(e.target.value)}
-                      className="w-full mb-1.5 p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs"
-                    />
-                    <select
+                    <label className="block font-bold text-slate-700 mb-1">Select Product *</label>
+                    <SearchableProductSelect
                       value={purchaseForm.productId}
-                      onChange={(e) => {
-                        const p = products.find(prod => prod.id === e.target.value)
+                      onChange={(newId, prod) => {
                         setPurchaseForm({
                           ...purchaseForm,
-                          productId: e.target.value,
-                          costPerUnit: p ? p.costPrice : purchaseForm.costPerUnit
+                          productId: newId,
+                          costPerUnit: prod ? prod.costPrice : purchaseForm.costPerUnit,
                         })
                       }}
-                      className="w-full p-2.5 bg-white border border-slate-300 rounded-xl min-h-[44px] font-bold"
-                    >
-                      {products
-                        .filter(p => !purchaseProductSearch || p.name.toLowerCase().includes(purchaseProductSearch.toLowerCase()))
-                        .map(p => (
-                          <option key={p.id} value={p.id}>
-                            {p.name} (Current Cost: {formatCurrency(p.costPrice)})
-                          </option>
-                        ))}
-                    </select>
+                      products={products}
+                      showStock={false}
+                      showCost={true}
+                      placeholder="Search and select product to purchase..."
+                    />
                   </div>
                 ) : (
                   /* New Product Fields for Direct Purchase */
@@ -4188,8 +3829,8 @@ export function InventoryPage() {
               <div className="grid grid-cols-3 gap-1.5">
                 {[
                   { id: 'none', label: 'Catalog Only (0)' },
-                  { id: 'warehouse', label: 'Central Warehouse' },
-                  { id: 'store', label: 'Retail Store' }
+                  { id: 'warehouse', label: 'Warehouse' },
+                  { id: 'store', label: stores[0]?.name || 'Store 1' }
                 ].map(opt => (
                   <button
                     key={opt.id}

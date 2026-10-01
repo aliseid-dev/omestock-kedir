@@ -1,7 +1,61 @@
-import React, { createContext, useContext, useState, useMemo } from 'react'
+import React, { createContext, useContext, useState, useMemo, useEffect } from 'react'
 import { useQuery, useMutation } from 'convex/react'
 import { api } from '../../convex/_generated/api'
 import { useAuth } from './AuthContext'
+
+export const SAMPLE_AUTO_PARTS = [
+  { id: 'sp-001', code: 'SP-001', name: '12 KG GAS nok', category: 'Gas Cylinders', unit: 'Kg', costPrice: 2950, sellingPrice: 3500, sellingPriceRange: '3500', minStockThreshold: 2, defaultCommissionRate: 5 },
+  { id: 'sp-002', code: 'SP-002', name: '12 KG GAS giyon', category: 'Gas Cylinders', unit: 'Kg', costPrice: 3300, sellingPrice: 3500, sellingPriceRange: '3500-3700', minStockThreshold: 2, defaultCommissionRate: 5 },
+  { id: 'sp-003', code: 'SP-003', name: '6 KG GAS', category: 'Gas Cylinders', unit: 'Kg', costPrice: 1300, sellingPrice: 1800, sellingPriceRange: '1800-2000', minStockThreshold: 2, defaultCommissionRate: 5 },
+  { id: 'sp-004', code: 'SP-004', name: '15kg Gas Cylinder', category: 'Gas Cylinders', unit: 'Kg', costPrice: 4000, sellingPrice: 4500, sellingPriceRange: '4500-5000', minStockThreshold: 2, defaultCommissionRate: 5 },
+  { id: 'sp-005', code: 'SP-005', name: '22 KG GAS', category: 'Gas Cylinders', unit: 'Kg', costPrice: 5500, sellingPrice: 6500, sellingPriceRange: '6500-7000', minStockThreshold: 1, defaultCommissionRate: 5 },
+  { id: 'sp-006', code: 'SP-006', name: '64010 Fuel filter rinken', category: 'Filters', unit: 'Piece', costPrice: 400, sellingPrice: 500, sellingPriceRange: '500-600', minStockThreshold: 5, defaultCommissionRate: 5 },
+  { id: 'sp-007', code: 'SP-007', name: 'FLANja lokal DX', category: 'Filters', unit: 'Piece', costPrice: 1800, sellingPrice: 2500, sellingPriceRange: '2500-2800', minStockThreshold: 6, defaultCommissionRate: 5 },
+  { id: 'sp-008', code: 'SP-008', name: 'ISUZU fuel filter', category: 'Filters', unit: 'Piece', costPrice: 400, sellingPrice: 600, sellingPriceRange: '600-750', minStockThreshold: 5, defaultCommissionRate: 5 },
+  { id: 'sp-009', code: 'SP-009', name: 'Coolant 1L', category: 'Coolants & Fluids', unit: 'L', costPrice: 350, sellingPrice: 500, sellingPriceRange: '500-600', minStockThreshold: 5, defaultCommissionRate: 5 },
+  { id: 'sp-010', code: 'SP-010', name: 'Coolant 4L', category: 'Coolants & Fluids', unit: 'L', costPrice: 1100, sellingPrice: 1200, sellingPriceRange: '1200-1800', minStockThreshold: 5, defaultCommissionRate: 5 },
+  { id: 'sp-011', code: 'SP-011', name: 'OSCAR BREAK FLUD', category: 'Brake Fluids', unit: 'Piece', costPrice: 150, sellingPrice: 300, sellingPriceRange: '300-400', minStockThreshold: 5, defaultCommissionRate: 5 },
+  { id: 'sp-012', code: 'SP-012', name: 'Asmico break fluid 1/2', category: 'Brake Fluids', unit: 'Piece', costPrice: 450, sellingPrice: 500, sellingPriceRange: '500-700', minStockThreshold: 5, defaultCommissionRate: 5 },
+  { id: 'sp-016', code: 'SP-016', name: 'SDK 30002 oil filter', category: 'Oil Filters', unit: 'Piece', costPrice: 350, sellingPrice: 500, sellingPriceRange: '500-650', minStockThreshold: 5, defaultCommissionRate: 5 },
+  { id: 'sp-030', code: 'SP-030', name: 'Rubia 1L', category: 'Engine Oils (1L)', unit: 'L', costPrice: 1100, sellingPrice: 1200, sellingPriceRange: '1200-1500', minStockThreshold: 5, defaultCommissionRate: 5 },
+  { id: 'sp-035', code: 'SP-035', name: 'Delo 4L', category: 'Engine Oils (4L)', unit: 'L', costPrice: 5000, sellingPrice: 5500, sellingPriceRange: '5500-6000', minStockThreshold: 3, defaultCommissionRate: 5 },
+]
+
+export const SAMPLE_WH_STOCK = {
+  'sp-001': 76,
+  'sp-002': 149,
+  'sp-003': 30,
+  'sp-004': 38,
+  'sp-005': 25,
+  'sp-006': 40,
+  'sp-007': 18,
+  'sp-008': 35,
+  'sp-009': 50,
+  'sp-010': 28,
+  'sp-011': 60,
+  'sp-012': 30,
+  'sp-016': 80,
+  'sp-030': 24,
+  'sp-035': 16,
+}
+
+export const SAMPLE_STORE_STOCK = {
+  'sp-001': 20,
+  'sp-002': 23,
+  'sp-003': 9,
+  'sp-004': 6,
+  'sp-005': 10,
+  'sp-006': 5,
+  'sp-007': 6,
+  'sp-008': 7,
+  'sp-009': 11,
+  'sp-010': 12,
+  'sp-011': 22,
+  'sp-012': 10,
+  'sp-016': 40,
+  'sp-030': 8,
+  'sp-035': 4,
+}
 
 export const TenantContext = createContext(null)
 
@@ -47,6 +101,19 @@ export function TenantProvider({ children }) {
   const overrideStockMutation = useMutation(api.inventory.overrideStock)
   const addStoreMutation = useMutation(api.inventory.addStore)
   const deleteStoreMutation = useMutation(api.inventory.deleteStore)
+  const seedSampleInventoryMutation = useMutation(api.inventory.seedSampleInventory)
+  const normalizeLocationNamesMutation = useMutation(api.inventory.normalizeLocationNames)
+  const clearOrganizationDataMutation = useMutation(api.users.clearOrganizationData)
+  const wipeClientAndResetMutation = useMutation(api.users.wipeClientAndReset)
+  const wipeEntireDatabaseMutation = useMutation(api.users.wipeEntireDatabase)
+  const deleteUserAccountMutation = useMutation(api.users.deleteUserAccount)
+
+  // Auto-normalize location names (e.g. Central Distribution Hub -> Warehouse, Retail Store #1 -> Store 1)
+  useEffect(() => {
+    if (clientId) {
+      normalizeLocationNamesMutation({ clientId }).catch(() => {})
+    }
+  }, [clientId, normalizeLocationNamesMutation])
 
   // Quick switch / session state inside active organization
   const [activeStaffUser, setActiveStaffUser] = useState(null)
@@ -55,7 +122,9 @@ export function TenantProvider({ children }) {
 
   // Format products with compatibility id field
   const products = useMemo(() => {
-    if (!inventoryData?.products) return []
+    if (!inventoryData?.products) {
+      return []
+    }
     return inventoryData.products.map((p) => ({
       ...p,
       id: p._id,
@@ -64,7 +133,9 @@ export function TenantProvider({ children }) {
 
   // Format warehouses with compatibility id field
   const warehouses = useMemo(() => {
-    if (!inventoryData?.warehouses) return []
+    if (!inventoryData?.warehouses) {
+      return []
+    }
     return inventoryData.warehouses.map((w) => ({
       ...w,
       id: w._id,
@@ -74,7 +145,9 @@ export function TenantProvider({ children }) {
 
   // Format stores with compatibility id field
   const stores = useMemo(() => {
-    if (!inventoryData?.stores) return []
+    if (!inventoryData?.stores) {
+      return []
+    }
     return inventoryData.stores.map((s) => ({
       ...s,
       id: s._id,
@@ -90,6 +163,7 @@ export function TenantProvider({ children }) {
       id: s._id,
       invoiceNumber: s.receiptNumber,
       totalAmount: s.total,
+      commissionTotal: s.commission ?? 0,
       salespersonName: s.staffName,
       salespersonId: s.staffId,
       storeName: s.storeName || 'Main Store',
@@ -182,11 +256,17 @@ export function TenantProvider({ children }) {
       const res = await createProductMutation({
         clientId,
         name: productData.name.trim(),
+        code: productData.code?.trim() || undefined,
         category: productData.category?.trim() || 'General',
+        unit: productData.unit?.trim() || 'Piece',
         sellingPrice: parseFloat(productData.sellingPrice) || 0,
+        sellingPriceRange: productData.sellingPriceRange?.trim() || undefined,
+        minSellingPrice: productData.minSellingPrice !== undefined ? parseFloat(productData.minSellingPrice) : undefined,
+        maxSellingPrice: productData.maxSellingPrice !== undefined ? parseFloat(productData.maxSellingPrice) : undefined,
         costPrice: parseFloat(productData.costPrice) || 0,
         defaultCommissionRate: parseFloat(productData.defaultCommissionRate) || 5,
-        minStockThreshold: parseInt(productData.minStockThreshold, 10) || 10,
+        minStockThreshold: parseInt(productData.minStockThreshold, 10) || 5,
+        notes: productData.notes?.trim() || undefined,
         initialWarehouseId: productData.initialWarehouseId || undefined,
         initialStoreId: productData.initialStoreId || undefined,
         initialQuantity: productData.initialQuantity !== undefined ? parseInt(productData.initialQuantity, 10) : undefined,
@@ -210,13 +290,19 @@ export function TenantProvider({ children }) {
       await updateProductMutation({
         productId,
         name: updates.name,
+        code: updates.code,
         category: updates.category,
+        unit: updates.unit,
         sellingPrice: updates.sellingPrice !== undefined ? parseFloat(updates.sellingPrice) : undefined,
+        sellingPriceRange: updates.sellingPriceRange !== undefined ? updates.sellingPriceRange : undefined,
+        minSellingPrice: updates.minSellingPrice !== undefined ? parseFloat(updates.minSellingPrice) : undefined,
+        maxSellingPrice: updates.maxSellingPrice !== undefined ? parseFloat(updates.maxSellingPrice) : undefined,
         costPrice: updates.costPrice !== undefined ? parseFloat(updates.costPrice) : undefined,
         defaultCommissionRate:
           updates.defaultCommissionRate !== undefined ? parseFloat(updates.defaultCommissionRate) : undefined,
         minStockThreshold:
           updates.minStockThreshold !== undefined ? parseInt(updates.minStockThreshold, 10) : undefined,
+        notes: updates.notes,
       })
       await logAuditAction({
         action: 'PRODUCT_UPDATED',
@@ -226,6 +312,21 @@ export function TenantProvider({ children }) {
       return true
     } catch (err) {
       console.error('updateProduct failed:', err)
+      return false
+    }
+  }
+
+  const seedSampleInventory = async () => {
+    if (!clientId) return false
+    try {
+      const res = await seedSampleInventoryMutation({ clientId })
+      await logAuditAction({
+        action: 'INVENTORY_SEEDED',
+        description: `Loaded 15 Kaya Yasmin Auto Parts sample items to warehouse and store`,
+      })
+      return res
+    } catch (err) {
+      console.error('seedSampleInventory failed:', err)
       return false
     }
   }
@@ -328,7 +429,7 @@ export function TenantProvider({ children }) {
       const totalUnits = inboundItems.reduce((acc, it) => acc + it.quantity, 0)
       await logAuditAction({
         action: 'WAREHOUSE_INBOUND',
-        description: `Warehouse inbound restock: ${totalUnits} units (via ${paymentMethod || 'Cash'}${supplierName ? `, Supplier: ${supplierName}` : ''})`,
+        description: `Warehouse direct purchase: ${totalUnits} units (via ${paymentMethod || 'Cash'}${supplierName ? `, Supplier: ${supplierName}` : ''})`,
         target: warehouseId,
       })
       return true
@@ -409,21 +510,24 @@ export function TenantProvider({ children }) {
 
       const commission = items.reduce((sum, it) => sum + (it.commissionAmount || 0), 0)
 
-      const created = await recordSaleMutation({
+      const saleMutationArgs = {
         clientId,
         storeId: saleData.storeId,
-        storeName: saleData.storeName,
         items,
         total: saleData.totalAmount,
         paymentMethod: saleData.paymentMethod || 'Cash',
-        bankProvider: saleData.bankProvider || undefined,
-        bankRef: saleData.bankRef || undefined,
-        customerName: saleData.customerName || undefined,
-        customerPhone: saleData.customerPhone || undefined,
         staffId: currentStaff?.id || currentUser?.id || 'staff',
         staffName: currentStaff?.name || currentUser?.name || 'Staff',
         commission,
-      })
+      }
+
+      if (saleData.storeName) saleMutationArgs.storeName = saleData.storeName
+      if (saleData.bankProvider) saleMutationArgs.bankProvider = saleData.bankProvider
+      if (saleData.bankRef) saleMutationArgs.bankRef = saleData.bankRef
+      if (saleData.customerName) saleMutationArgs.customerName = saleData.customerName
+      if (saleData.customerPhone) saleMutationArgs.customerPhone = saleData.customerPhone
+
+      const created = await recordSaleMutation(saleMutationArgs)
 
       if (created) {
         await logAuditAction({
@@ -433,7 +537,15 @@ export function TenantProvider({ children }) {
         })
       }
 
-      return created ? { ...created, id: created._id, invoiceNumber: created.receiptNumber } : null
+      return created
+        ? {
+            ...created,
+            id: created._id,
+            invoiceNumber: created.receiptNumber,
+            totalAmount: created.total ?? saleData.totalAmount,
+            commissionTotal: created.commission ?? commission,
+          }
+        : null
     } catch (err) {
       console.error('recordSale failed:', err)
       throw err
@@ -561,7 +673,7 @@ export function TenantProvider({ children }) {
       const res = await addStoreMutation({
         clientId,
         name: name.trim(),
-        location: location?.trim() || 'Main Branch',
+        location: location?.trim() || name.trim() || 'Store 1',
       })
       await logAuditAction({
         action: 'STORE_CREATED',
@@ -590,6 +702,53 @@ export function TenantProvider({ children }) {
     }
   }
 
+  // Clear products, sales, and reset inventory stock to {} for the active client
+  const clearDatabaseData = async () => {
+    if (!activeClientId) return false
+    try {
+      await clearOrganizationDataMutation({ clientId: activeClientId })
+      return true
+    } catch (err) {
+      console.error('clearDatabaseData failed:', err)
+      throw err
+    }
+  }
+
+  // Wipe client organization and all associated data, returning user to initial onboarding
+  const wipeAndResetAccount = async () => {
+    if (!activeClientId) return false
+    try {
+      await wipeClientAndResetMutation({ clientId: activeClientId })
+      return true
+    } catch (err) {
+      console.error('wipeAndResetAccount failed:', err)
+      throw err
+    }
+  }
+
+  // Wipe all database tables across the deployment
+  const wipeAllDatabaseData = async () => {
+    try {
+      await wipeEntireDatabaseMutation()
+      return true
+    } catch (err) {
+      console.error('wipeAllDatabaseData failed:', err)
+      throw err
+    }
+  }
+
+  // Delete user record from Convex
+  const deleteAccount = async (userId) => {
+    if (!userId) return false
+    try {
+      await deleteUserAccountMutation({ userId })
+      return true
+    } catch (err) {
+      console.error('deleteAccount failed:', err)
+      throw err
+    }
+  }
+
   return (
     <TenantContext.Provider
       value={{
@@ -610,6 +769,7 @@ export function TenantProvider({ children }) {
         createProduct,
         updateProduct,
         deleteProduct,
+        seedSampleInventory,
         transferStock,
         recordWarehouseInbound,
         recordDirectPurchase,
@@ -624,6 +784,10 @@ export function TenantProvider({ children }) {
         deleteStaffMember,
         saveStaffMember,
         updateBusinessName,
+        clearDatabaseData,
+        wipeAndResetAccount,
+        wipeAllDatabaseData,
+        deleteAccount,
         // POS Passcode / Switch
         activeStaffUser,
         isPasscodeLocked,

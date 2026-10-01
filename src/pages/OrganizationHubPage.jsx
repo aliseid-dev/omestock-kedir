@@ -47,7 +47,7 @@ export function OrganizationHubPage() {
       await createOrganization({
         name,
         currency,
-        initialStoreName: initialStoreName.trim() || 'Main Branch',
+        initialStoreName: initialStoreName.trim() || 'Store 1',
         storeLocation: storeLocation.trim(),
       })
     } catch (err) {
@@ -288,7 +288,7 @@ export function OrganizationHubPage() {
                     value={initialStoreName}
                     onChange={(e) => setInitialStoreName(e.target.value)}
                     className="w-full text-xs px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-2xl focus:outline-none focus:ring-2 focus:ring-emerald-500 font-medium min-h-[44px]"
-                    placeholder="e.g. Flagship Store (Downtown)"
+                    placeholder="e.g. Store 1"
                   />
                 </div>
 
@@ -305,7 +305,7 @@ export function OrganizationHubPage() {
               </div>
 
               <div className="bg-slate-50 rounded-2xl p-3 text-[11px] text-slate-500 border border-slate-100">
-                A <span className="font-bold text-slate-700">Central Distribution Warehouse</span> will be provisioned automatically for inventory routing.
+                A <span className="font-bold text-slate-700">Warehouse</span> will be provisioned automatically for inventory routing.
               </div>
 
               <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">

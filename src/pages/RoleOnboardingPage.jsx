@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useUser, useClerk } from '@clerk/clerk-react'
 import { useMutation } from 'convex/react'
 import { api } from '../../convex/_generated/api'
-import { Building2, UserCheck, ShieldCheck, ArrowRight, Sparkles, AlertCircle, Loader2, LogOut } from 'lucide-react'
+import { Building2, UserCheck, ShieldCheck, ArrowRight, Sparkles, AlertCircle, Loader2, LogOut, CheckCircle2 } from 'lucide-react'
 import { Card } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'
 import { Badge } from '../components/ui/Badge'
@@ -75,27 +75,25 @@ export function RoleOnboardingPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 flex flex-col justify-center items-center px-4 py-8 text-slate-800">
-      {/* Brand Header */}
-      <div className="text-center mb-8 max-w-md w-full">
-        <div className="w-14 h-14 rounded-2xl bg-blue-600 text-white flex items-center justify-center font-black text-2xl mx-auto shadow-xl shadow-blue-600/30 mb-3 border border-blue-400/20">
+      {/* Brand Header - Side by Side */}
+      <div className="flex items-center justify-center gap-3 mb-6 sm:mb-8">
+        <div className="w-10 h-10 rounded-xl bg-black text-white flex items-center justify-center font-black text-xl shadow-lg border border-slate-800">
           O
         </div>
-        <h1 className="text-2xl font-black tracking-tight text-white">OMESTOCK</h1>
-        <p className="text-xs text-slate-400 font-medium mt-1">
-          Smart Sales Recording & Real-time Stock Management
-        </p>
+        <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white">OMESTOCK</h1>
       </div>
 
-      <Card className="bg-white rounded-3xl shadow-2xl border border-slate-100 w-full max-w-xl p-6 sm:p-8 animate-in fade-in duration-200">
+      <Card className="bg-white rounded-3xl shadow-2xl border border-slate-100 w-full max-w-lg p-5 sm:p-8 animate-in fade-in duration-200">
         <div className="text-center mb-6">
-          <Badge variant="blue" className="px-3 py-1 font-semibold text-xs uppercase tracking-wider mb-2">
-            Welcome, {user?.firstName || 'User'}
-          </Badge>
-          <h2 className="text-2xl font-black text-slate-900 tracking-tight">
-            How will you use OMESTOCK?
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-100 text-slate-700 font-bold text-xs uppercase tracking-wider mb-2 border border-slate-200">
+            <Sparkles className="w-3.5 h-3.5 text-blue-600" />
+            Welcome, {user?.firstName || user?.fullName || 'User'}
+          </span>
+          <h2 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight mt-1">
+            Choose Your Role
           </h2>
-          <p className="text-sm text-slate-500 mt-1">
-            Choose your role to configure your workspace and permissions
+          <p className="text-xs sm:text-sm text-slate-500 mt-1">
+            Configure your workspace and system permissions
           </p>
         </div>
 
@@ -107,7 +105,7 @@ export function RoleOnboardingPage() {
         )}
 
         {/* Role Selection Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 mb-6">
           {/* Owner Card */}
           <button
             type="button"
@@ -115,18 +113,25 @@ export function RoleOnboardingPage() {
               setSelectedRole('owner')
               setError('')
             }}
-            className={`p-5 rounded-2xl border-2 text-left transition-all ${
+            className={`p-4 sm:p-5 rounded-2xl border-2 text-left transition-all relative cursor-pointer active:scale-[0.99] ${
               selectedRole === 'owner'
-                ? 'border-blue-600 bg-blue-50/50 shadow-md ring-2 ring-blue-500/20'
+                ? 'border-black bg-slate-50/80 shadow-md ring-2 ring-black/10'
                 : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50/50'
             }`}
           >
-            <div className="w-12 h-12 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center mb-4">
-              <Building2 className="w-6 h-6" />
+            {selectedRole === 'owner' && (
+              <div className="absolute top-3.5 right-3.5 text-black">
+                <CheckCircle2 className="w-5 h-5 fill-black text-white" />
+              </div>
+            )}
+            <div className={`w-11 h-11 rounded-xl flex items-center justify-center mb-3 transition-colors ${
+              selectedRole === 'owner' ? 'bg-black text-white' : 'bg-slate-100 text-slate-800'
+            }`}>
+              <Building2 className="w-5 h-5" />
             </div>
-            <h3 className="font-bold text-slate-900 text-base mb-1">Business Owner</h3>
+            <h3 className="font-extrabold text-slate-900 text-sm sm:text-base mb-1">Business Owner</h3>
             <p className="text-xs text-slate-500 leading-relaxed">
-              Create an organization, manage warehouses, assign staff, and track stock & sales.
+              Create an enterprise, manage warehouses, assign staff, and track stock & sales.
             </p>
           </button>
 
@@ -137,25 +142,32 @@ export function RoleOnboardingPage() {
               setSelectedRole('salesperson')
               setError('')
             }}
-            className={`p-5 rounded-2xl border-2 text-left transition-all ${
+            className={`p-4 sm:p-5 rounded-2xl border-2 text-left transition-all relative cursor-pointer active:scale-[0.99] ${
               selectedRole === 'salesperson'
-                ? 'border-emerald-600 bg-emerald-50/50 shadow-md ring-2 ring-emerald-500/20'
+                ? 'border-emerald-600 bg-emerald-50/40 shadow-md ring-2 ring-emerald-500/10'
                 : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50/50'
             }`}
           >
-            <div className="w-12 h-12 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center mb-4">
-              <UserCheck className="w-6 h-6" />
+            {selectedRole === 'salesperson' && (
+              <div className="absolute top-3.5 right-3.5 text-emerald-600">
+                <CheckCircle2 className="w-5 h-5 fill-emerald-600 text-white" />
+              </div>
+            )}
+            <div className={`w-11 h-11 rounded-xl flex items-center justify-center mb-3 transition-colors ${
+              selectedRole === 'salesperson' ? 'bg-emerald-600 text-white' : 'bg-emerald-50 text-emerald-700'
+            }`}>
+              <UserCheck className="w-5 h-5" />
             </div>
-            <h3 className="font-bold text-slate-900 text-base mb-1">Salesperson</h3>
+            <h3 className="font-extrabold text-slate-900 text-sm sm:text-base mb-1">Salesperson</h3>
             <p className="text-xs text-slate-500 leading-relaxed">
-              Join an existing business using a 6-digit company invite code to access the POS terminal.
+              Join an existing business using a 6-digit company invite code.
             </p>
           </button>
         </div>
 
         {/* Specific Form based on role */}
         {selectedRole === 'owner' && (
-          <form onSubmit={handleOwnerSubmit} className="space-y-4 pt-2 border-t border-slate-100 animate-in fade-in duration-200">
+          <form onSubmit={handleOwnerSubmit} className="space-y-4 pt-3 border-t border-slate-100 animate-in fade-in duration-200">
             <div>
               <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
                 Business / Enterprise Name
@@ -166,17 +178,17 @@ export function RoleOnboardingPage() {
                 value={businessName}
                 onChange={(e) => setBusinessName(e.target.value)}
                 placeholder="e.g. Mekelle Electronics Trading"
-                className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-600 text-sm font-medium"
+                className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-black text-sm font-medium"
               />
               <p className="text-xs text-slate-400 mt-1.5">
-                We'll automatically initialize your default central warehouse, retail store, and unique 6-digit invite code.
+                Default central warehouse, retail store, and unique 6-digit invite code will automatically be initialized.
               </p>
             </div>
 
             <Button
               type="submit"
               disabled={loading || !businessName.trim()}
-              className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl flex items-center justify-center gap-2"
+              className="w-full py-3 bg-black hover:bg-slate-800 text-white font-bold rounded-xl flex items-center justify-center gap-2 cursor-pointer shadow-sm transition-all"
             >
               {loading ? (
                 <>
@@ -194,7 +206,7 @@ export function RoleOnboardingPage() {
         )}
 
         {selectedRole === 'salesperson' && (
-          <form onSubmit={handleSalespersonSubmit} className="space-y-4 pt-2 border-t border-slate-100 animate-in fade-in duration-200">
+          <form onSubmit={handleSalespersonSubmit} className="space-y-4 pt-3 border-t border-slate-100 animate-in fade-in duration-200">
             <div>
               <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
                 6-Digit Company Code
@@ -216,7 +228,7 @@ export function RoleOnboardingPage() {
             <Button
               type="submit"
               disabled={loading || companyCode.trim().length !== 6}
-              className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-xl flex items-center justify-center gap-2"
+              className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl flex items-center justify-center gap-2 cursor-pointer shadow-sm transition-all"
             >
               {loading ? (
                 <>
@@ -234,10 +246,13 @@ export function RoleOnboardingPage() {
         )}
 
         <div className="mt-8 pt-4 border-t border-slate-100 flex items-center justify-between text-xs text-slate-400">
-          <span>Signed in as {user?.primaryEmailAddress?.emailAddress}</span>
+          <span className="truncate max-w-[200px] sm:max-w-[280px]">
+            Signed in as <strong className="text-slate-600 font-semibold">{user?.primaryEmailAddress?.emailAddress}</strong>
+          </span>
           <button
+            type="button"
             onClick={() => signOut()}
-            className="flex items-center gap-1 text-slate-500 hover:text-slate-800 font-medium transition-colors"
+            className="flex items-center gap-1.5 text-slate-500 hover:text-slate-900 font-bold transition-colors cursor-pointer shrink-0 ml-2"
           >
             <LogOut className="w-3.5 h-3.5" />
             <span>Sign out</span>

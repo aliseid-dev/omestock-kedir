@@ -27,11 +27,17 @@ export default defineSchema({
   products: defineTable({
     clientId: v.id("clients"),
     name: v.string(),
+    code: v.optional(v.string()), // Item ID / SKU e.g. "SP-001"
     category: v.optional(v.string()),
-    sellingPrice: v.number(),
+    unit: v.optional(v.string()), // e.g. "Piece", "Kg", "L", "KIT"
+    sellingPrice: v.number(), // Base selling price
+    sellingPriceRange: v.optional(v.string()), // e.g. "3500-3700" when price may vary
+    minSellingPrice: v.optional(v.number()),
+    maxSellingPrice: v.optional(v.number()),
     costPrice: v.number(),
     defaultCommissionRate: v.optional(v.number()),
     minStockThreshold: v.optional(v.number()),
+    notes: v.optional(v.string()),
     createdAt: v.string(),
   }).index("by_clientId", ["clientId"]),
 
@@ -56,8 +62,9 @@ export default defineSchema({
   // Sales Records
   sales: defineTable({
     clientId: v.id("clients"),
-    storeId: v.id("stores"),
+    storeId: v.string(), // Store ID or Warehouse ID
     storeName: v.optional(v.string()),
+    locationType: v.optional(v.string()), // "store" | "warehouse"
     receiptNumber: v.string(),
     items: v.array(
       v.object({
