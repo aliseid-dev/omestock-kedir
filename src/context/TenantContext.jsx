@@ -576,15 +576,22 @@ export function TenantProvider({ children }) {
         .map((it) => `• <b>${it.productName}</b>: <code>${it.quantity}</code> units`)
         .join('\n')
 
-      dispatchTelegramApprovalAction({
-        requestId,
-        type: 'transfer',
-        requestedByName: currentUser?.name || currentUser?.email || 'Staff Member',
-        sourceName,
-        destinationName,
-        itemsSummary,
-        notes: notes || undefined,
-      }).catch((err) => console.error('Telegram dispatch error:', err))
+      try {
+        const tgRes = await dispatchTelegramApprovalAction({
+          requestId,
+          type: 'transfer',
+          requestedByName: currentUser?.name || currentUser?.email || 'Staff Member',
+          sourceName,
+          destinationName,
+          itemsSummary,
+          notes: notes || undefined,
+        })
+        if (tgRes && !tgRes.success) {
+          console.warn('Telegram notification warning:', tgRes.error)
+        }
+      } catch (tgErr) {
+        console.error('Telegram dispatch error:', tgErr)
+      }
 
       return requestId
     } catch (err) {
@@ -647,17 +654,24 @@ export function TenantProvider({ children }) {
         )
         .join('\n')
 
-      dispatchTelegramApprovalAction({
-        requestId,
-        type: 'direct_purchase',
-        requestedByName: currentUser?.name || currentUser?.email || 'Staff Member',
-        destinationName,
-        itemsSummary,
-        totalCost,
-        paymentMethod: paymentMethod || 'Cash',
-        supplierName: supplierName || undefined,
-        notes: notes || undefined,
-      }).catch((err) => console.error('Telegram dispatch error:', err))
+      try {
+        const tgRes = await dispatchTelegramApprovalAction({
+          requestId,
+          type: 'direct_purchase',
+          requestedByName: currentUser?.name || currentUser?.email || 'Staff Member',
+          destinationName,
+          itemsSummary,
+          totalCost,
+          paymentMethod: paymentMethod || 'Cash',
+          supplierName: supplierName || undefined,
+          notes: notes || undefined,
+        })
+        if (tgRes && !tgRes.success) {
+          console.warn('Telegram notification warning:', tgRes.error)
+        }
+      } catch (tgErr) {
+        console.error('Telegram dispatch error:', tgErr)
+      }
 
       return requestId
     } catch (err) {
