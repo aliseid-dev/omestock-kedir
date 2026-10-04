@@ -1589,37 +1589,6 @@ export function InventoryPage() {
 
   return (
     <div className="space-y-5 pb-28 sm:pb-8 animate-in fade-in duration-200">
-      {/* Telegram Approvals Banner for Owner */}
-      {isOwner && pendingApprovals?.length > 0 && (
-        <div className="p-3.5 sm:p-4 bg-gradient-to-r from-blue-900 to-indigo-900 text-white rounded-2xl shadow-lg flex flex-col sm:flex-row sm:items-center justify-between gap-3 border border-blue-800">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-blue-500/30 border border-blue-400/40 text-blue-300 flex items-center justify-center font-bold shrink-0">
-              <Bell className="w-5 h-5 animate-pulse text-blue-200" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="font-black text-sm text-white">
-                  {pendingApprovals.length} Pending Approval Request{pendingApprovals.length > 1 ? 's' : ''}
-                </span>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-400 text-amber-950">
-                  Telegram & Web
-                </span>
-              </div>
-              <p className="text-xs text-blue-200 mt-0.5">
-                Staff have submitted stock transfers or direct purchases requiring your approval.
-              </p>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => setIsApprovalsModalOpen(true)}
-            className="py-2 px-4 rounded-xl bg-white text-blue-900 hover:bg-blue-50 font-bold text-xs shadow-md transition-all shrink-0 cursor-pointer text-center"
-          >
-            Review & Approve ({pendingApprovals.length})
-          </button>
-        </div>
-      )}
-
       {!activeLocation ? (
         /* ═════════════════════════════════════════════════════════════════════ */
         /* VIEW 1: LOCATIONS HUB (AVAILABLE STORES & MAIN WAREHOUSE)            */

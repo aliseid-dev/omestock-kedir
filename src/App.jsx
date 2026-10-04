@@ -15,6 +15,7 @@ import { StaffPage } from './pages/StaffPage'
 import { UnpaidSalesPage } from './pages/UnpaidSalesPage'
 import { AuditTrailPage } from './pages/AuditTrailPage'
 import { ProfilePage } from './pages/ProfilePage'
+import { NotificationsPage } from './pages/NotificationsPage'
 import { Loader2 } from 'lucide-react'
 
 function AppContent() {
@@ -65,6 +66,7 @@ function AppContent() {
         <Route path="staff" element={<StaffPage />} />
         <Route path="unpaid-sales" element={<UnpaidSalesPage />} />
         <Route path="audit-trail" element={<AuditTrailPage />} />
+        <Route path="notifications" element={<NotificationsPage />} />
 
         {/* Secondary modules */}
         <Route path="dashboard" element={<ComingSoonPage title="Executive Analytics Dashboard" />} />

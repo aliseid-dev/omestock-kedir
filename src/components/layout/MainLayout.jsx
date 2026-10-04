@@ -21,7 +21,8 @@ import {
   KeyRound,
   Trash2,
   AlertTriangle,
-  RotateCcw
+  RotateCcw,
+  Bell
 } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 import { useTenant } from '../../context/TenantContext'
@@ -44,13 +45,18 @@ export function MainLayout() {
     updateBusinessName,
     clearDatabaseData,
     wipeAndResetAccount,
-    deleteAccount
+    deleteAccount,
+    pendingApprovals
   } = useTenant()
 
   const userInitial = useMemo(() => {
     const rawName = currentUser?.name || clerkUser?.fullName || clerkUser?.firstName || currentUser?.email || 'U'
     return rawName.trim().charAt(0).toUpperCase() || 'U'
   }, [currentUser?.name, currentUser?.email, clerkUser?.fullName, clerkUser?.firstName])
+
+  const notificationCount = useMemo(() => {
+    return pendingApprovals?.length || 0
+  }, [pendingApprovals?.length])
 
   const [showUserMenu, setShowUserMenu] = useState(false)
   const [showTenantMenu, setShowTenantMenu] = useState(false)
@@ -216,6 +222,13 @@ export function MainLayout() {
       label: 'Audit',
       icon: ShieldCheck,
       ownerOnly: true,
+    },
+    {
+      to: '/notifications',
+      label: 'Notifications',
+      icon: Bell,
+      ownerOnly: false,
+      badge: notificationCount > 0 ? notificationCount : null,
     },
     {
       to: '/dashboard',
@@ -421,17 +434,33 @@ export function MainLayout() {
               </div>
             </Link>
 
-            {/* Logged in User Profile Avatar: Circle with initial */}
-            <div className="relative" ref={userMenuRef}>
-              <button
-                type="button"
-                onClick={() => setShowUserMenu(!showUserMenu)}
-                className="w-9 h-9 rounded-full bg-black hover:bg-slate-800 active:scale-95 text-white font-black text-xs flex items-center justify-center shadow-xs border border-slate-200 shrink-0 cursor-pointer transition-transform"
-                title={currentUser?.name || 'Account menu'}
-                aria-label="Account menu"
+            {/* Right Header: Notification Bell + Circular Profile Avatar */}
+            <div className="flex items-center gap-2">
+              <Link
+                to="/notifications"
+                className="relative w-9 h-9 rounded-full bg-slate-100 hover:bg-slate-200/80 active:scale-95 text-slate-700 flex items-center justify-center border border-slate-200 shrink-0 cursor-pointer transition-transform"
+                title="Notifications & Requests"
+                aria-label="Notifications"
               >
-                {userInitial}
-              </button>
+                <Bell className="w-4 h-4 text-slate-700" />
+                {notificationCount > 0 && (
+                  <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-rose-500 text-white font-black text-[10px] flex items-center justify-center border-2 border-white shadow-xs animate-in zoom-in-50">
+                    {notificationCount > 99 ? '99+' : notificationCount}
+                  </span>
+                )}
+              </Link>
+
+              {/* Logged in User Profile Avatar: Circle with initial */}
+              <div className="relative" ref={userMenuRef}>
+                <button
+                  type="button"
+                  onClick={() => setShowUserMenu(!showUserMenu)}
+                  className="w-9 h-9 rounded-full bg-black hover:bg-slate-800 active:scale-95 text-white font-black text-xs flex items-center justify-center shadow-xs border border-slate-200 shrink-0 cursor-pointer transition-transform"
+                  title={currentUser?.name || 'Account menu'}
+                  aria-label="Account menu"
+                >
+                  {userInitial}
+                </button>
 
               {/* Mobile Little Menu */}
               {showUserMenu && (
@@ -501,6 +530,7 @@ export function MainLayout() {
                   </div>
                 </>
               )}
+              </div>
             </div>
           </div>
         </header>
@@ -520,6 +550,21 @@ export function MainLayout() {
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
               Live Synced
             </span>
+
+            {/* Notification Bell Icon */}
+            <Link
+              to="/notifications"
+              className="relative w-9 h-9 rounded-full bg-slate-100 hover:bg-slate-200 active:scale-95 text-slate-700 flex items-center justify-center border border-slate-200 shrink-0 cursor-pointer transition-transform"
+              title="Notifications & Requests"
+              aria-label="Notifications"
+            >
+              <Bell className="w-4 h-4 text-slate-700" />
+              {notificationCount > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-rose-500 text-white font-black text-[10px] flex items-center justify-center border-2 border-white shadow-xs">
+                  {notificationCount > 99 ? '99+' : notificationCount}
+                </span>
+              )}
+            </Link>
 
             <div className="relative" ref={desktopUserMenuRef}>
               <button
@@ -733,7 +778,31 @@ export function MainLayout() {
             </div>
 
             <div className="py-4 space-y-2">
-              
+              {/* Notifications Link in Mobile More */}
+              <Link
+                to="/notifications"
+                onClick={() => setShowMobileMoreSheet(false)}
+                className="flex items-center gap-3 p-3.5 rounded-xl bg-slate-50 hover:bg-slate-100 transition-colors touch-manipulation font-bold text-xs text-slate-800"
+              >
+                <div className="w-8 h-8 rounded-lg bg-blue-100 text-blue-800 flex items-center justify-center relative">
+                  <Bell className="w-4 h-4" />
+                  {notificationCount > 0 && (
+                    <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-rose-500 ring-2 ring-white" />
+                  )}
+                </div>
+                <div className="flex-1">
+                  <div className="flex items-center justify-between">
+                    <span>Notifications & Requests</span>
+                    {notificationCount > 0 && (
+                      <span className="text-[10px] font-extrabold px-1.5 py-0.2 rounded-full bg-rose-500 text-white">
+                        {notificationCount}
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-[10px] text-slate-500 font-normal">Review pending transfers and purchase requests</div>
+                </div>
+              </Link>
+
               {/* Profile Link in Mobile More */}
               <Link
                 to="/profile"
