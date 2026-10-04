@@ -244,6 +244,7 @@ export function InventoryPage() {
   const [isApprovalsModalOpen, setIsApprovalsModalOpen] = useState(false)
   const [processingApprovalId, setProcessingApprovalId] = useState(null)
   const [requireTelegramApproval, setRequireTelegramApproval] = useState(!isOwner)
+  const [isSubmittingStorePurchase, setIsSubmittingStorePurchase] = useState(false)
 
   const handleSeedSampleData = async () => {
     if (!confirm('Load 15 sample items from Kaya Yasmin Auto Parts into warehouse and store?')) return
@@ -866,6 +867,7 @@ export function InventoryPage() {
   const handleStoreDirectPurchaseSubmit = async (e) => {
     e.preventDefault()
     if (!activeLocation) return
+    if (isSubmittingStorePurchase) return
 
     const {
       productId,
@@ -888,54 +890,98 @@ export function InventoryPage() {
       return
     }
 
-    let targetProductId = productId
-    let targetProductName = ''
+    setIsSubmittingStorePurchase(true)
 
-    if (isStorePurchaseNewProduct) {
-      if (!newProductName || !newProductName.trim()) {
-        toast.warning('Product Name Required', 'Please enter a name for the new product.')
+    try {
+      let targetProductId = productId
+      let targetProductName = ''
+
+      if (isStorePurchaseNewProduct) {
+        if (!newProductName || !newProductName.trim()) {
+          toast.warning('Product Name Required', 'Please enter a name for the new product.')
+          return
+        }
+        const trimmedName = newProductName.trim()
+        const existing = products.find(p => p.name.toLowerCase() === trimmedName.toLowerCase())
+        if (existing) {
+          targetProductId = existing.id
+          targetProductName = existing.name
+        } else {
+          const created = await createProduct({
+            name: trimmedName,
+            category: newProductCategory?.trim() || 'General',
+            sellingPrice: newProductSellingPrice || '30',
+            costPrice: costPerUnit || '20',
+            defaultCommissionRate: 5,
+            minStockThreshold: 5,
+          }, currentUser)
+          if (!created) {
+            toast.error('Creation Failed', 'Failed to create new product. Please try again.')
+            return
+          }
+          targetProductId = created.id
+          targetProductName = created.name
+        }
+      } else {
+        if (!productId) {
+          toast.warning('Product Required', 'Please select a product.')
+          return
+        }
+        const prod = products.find(p => p.id === productId)
+        targetProductName = prod?.name || 'Product'
+      }
+
+      let bankProviderName = undefined
+      if (paymentMethod === 'Banking') {
+        const bankObj = ETHIOPIAN_PAYMENT_PROVIDERS.find(b => b.id === bankProvider)
+        bankProviderName = bankObj ? bankObj.name : bankProvider
+      }
+
+      const ref = paymentMethod === 'Banking'
+        ? bankReference
+        : paymentMethod === 'Telebirr'
+        ? telebirrReference
+        : ''
+
+      const supplierStr = supplierName
+        ? `${supplierName}${ref ? ` (Ref: ${ref})` : ''}`
+        : (ref ? `Ref: ${ref}` : undefined)
+
+      if (!isOwner || requireTelegramApproval) {
+        await submitDirectPurchaseRequest({
+          destinationLocationType: activeLocationType || 'store',
+          destinationLocationId: activeLocation.id,
+          destinationName: activeLocation.name,
+          items: [{
+            productId: targetProductId,
+            productName: targetProductName,
+            quantity: qty,
+            costPerUnit: cost,
+          }],
+          paymentMethod,
+          bankProvider: bankProviderName,
+          supplierName: supplierStr,
+        })
+        setIsStoreDirectPurchaseOpen(false)
+        setIsStorePurchaseNewProduct(false)
+        toast.info(
+          'Approval Request Sent',
+          `Direct purchase request for ${qty} unit${qty > 1 ? 's' : ''} of "${targetProductName}" sent to Owner on Telegram for review.`
+        )
+        setStoreDirectPurchaseForm(prev => ({
+          ...prev,
+          productId: '',
+          quantity: '10',
+          supplierName: '',
+          bankReference: '',
+          telebirrReference: '',
+          newProductName: '',
+        }))
         return
       }
-      const created = await createProduct({
-        name: newProductName.trim(),
-        category: newProductCategory?.trim() || 'General',
-        sellingPrice: newProductSellingPrice || '30',
-        costPrice: costPerUnit || '20',
-        defaultCommissionRate: 5,
-        minStockThreshold: 5,
-      }, currentUser)
-      if (!created) {
-        toast.error('Creation Failed', 'Failed to create new product. Please try again.')
-        return
-      }
-      targetProductId = created.id
-      targetProductName = created.name
-    } else {
-      if (!productId) {
-        toast.warning('Product Required', 'Please select a product.')
-        return
-      }
-      const prod = products.find(p => p.id === productId)
-      targetProductName = prod?.name || 'Product'
-    }
 
-    let bankProviderName = undefined
-    if (paymentMethod === 'Banking') {
-      const bankObj = ETHIOPIAN_PAYMENT_PROVIDERS.find(b => b.id === bankProvider)
-      bankProviderName = bankObj ? bankObj.name : bankProvider
-    }
-
-    const ref = paymentMethod === 'Banking'
-      ? bankReference
-      : paymentMethod === 'Telebirr'
-      ? telebirrReference
-      : ''
-
-    if (!isOwner || requireTelegramApproval) {
-      await submitDirectPurchaseRequest({
-        destinationLocationType: activeLocationType || 'store',
-        destinationLocationId: activeLocation.id,
-        destinationName: activeLocation.name,
+      const success = await recordDirectPurchase({
+        storeId: activeLocation.id,
         items: [{
           productId: targetProductId,
           productName: targetProductName,
@@ -946,57 +992,33 @@ export function InventoryPage() {
         bankProvider: bankProviderName,
         supplierName: supplierStr,
       })
-      setIsStoreDirectPurchaseOpen(false)
-      setIsStorePurchaseNewProduct(false)
-      toast.info(
-        'Approval Request Sent',
-        `Direct purchase request for ${qty} unit${qty > 1 ? 's' : ''} of "${targetProductName}" sent to Owner on Telegram for review.`
-      )
-      setStoreDirectPurchaseForm(prev => ({
-        ...prev,
-        productId: '',
-        quantity: '10',
-        supplierName: '',
-        bankReference: '',
-        telebirrReference: '',
-        newProductName: '',
-      }))
-      return
-    }
 
-    const success = await recordDirectPurchase({
-      storeId: activeLocation.id,
-      items: [{
-        productId: targetProductId,
-        productName: targetProductName,
-        quantity: qty,
-        costPerUnit: cost,
-      }],
-      paymentMethod,
-      bankProvider: bankProviderName,
-      supplierName: supplierStr,
-    })
-
-    if (success) {
-      setIsStoreDirectPurchaseOpen(false)
-      setIsStorePurchaseNewProduct(false)
-      toast.success(
-        isStorePurchaseNewProduct ? 'New Product Added & Stocked' : 'Purchase Recorded',
-        `Added ${qty} units of "${targetProductName}" to ${activeLocation.name}.`
-      )
-      setStoreDirectPurchaseForm(prev => ({
-        ...prev,
-        productId: '',
-        quantity: '10',
-        supplierName: '',
-        bankReference: '',
-        telebirrReference: '',
-        newProductName: '',
-        newProductCategory: 'General',
-        newProductSellingPrice: '30',
-      }))
-    } else {
-      toast.error('Purchase Failed', 'Could not record direct store purchase.')
+      if (success) {
+        setIsStoreDirectPurchaseOpen(false)
+        setIsStorePurchaseNewProduct(false)
+        toast.success(
+          isStorePurchaseNewProduct ? 'New Product Added & Stocked' : 'Purchase Recorded',
+          `Added ${qty} units of "${targetProductName}" to ${activeLocation.name}.`
+        )
+        setStoreDirectPurchaseForm(prev => ({
+          ...prev,
+          productId: '',
+          quantity: '10',
+          supplierName: '',
+          bankReference: '',
+          telebirrReference: '',
+          newProductName: '',
+          newProductCategory: 'General',
+          newProductSellingPrice: '30',
+        }))
+      } else {
+        toast.error('Purchase Failed', 'Could not record direct store purchase.')
+      }
+    } catch (err) {
+      console.error('Direct purchase submission error:', err)
+      toast.error('Purchase Failed', err.message || 'Could not complete direct purchase request.')
+    } finally {
+      setIsSubmittingStorePurchase(false)
     }
   }
 
@@ -3159,9 +3181,14 @@ export function InventoryPage() {
                 variant="primary"
                 size="md"
                 type="submit"
-                className="w-full sm:w-auto font-bold min-h-[44px] bg-emerald-600 hover:bg-emerald-700 text-white"
+                disabled={isSubmittingStorePurchase}
+                className="w-full sm:w-auto font-bold min-h-[44px] bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50"
               >
-                Record Direct Purchase
+                {isSubmittingStorePurchase
+                  ? 'Submitting...'
+                  : (!isOwner || requireTelegramApproval
+                    ? 'Send for Telegram Approval'
+                    : 'Record Direct Purchase')}
               </Button>
             </div>
           </form>
