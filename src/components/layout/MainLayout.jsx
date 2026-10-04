@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react'
+import React, { useState, useRef, useEffect, useMemo } from 'react'
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard,
@@ -46,6 +46,11 @@ export function MainLayout() {
     wipeAndResetAccount,
     deleteAccount
   } = useTenant()
+
+  const userInitial = useMemo(() => {
+    const rawName = currentUser?.name || clerkUser?.fullName || clerkUser?.firstName || currentUser?.email || 'U'
+    return rawName.trim().charAt(0).toUpperCase() || 'U'
+  }, [currentUser?.name, currentUser?.email, clerkUser?.fullName, clerkUser?.firstName])
 
   const [showUserMenu, setShowUserMenu] = useState(false)
   const [showTenantMenu, setShowTenantMenu] = useState(false)
@@ -364,8 +369,8 @@ export function MainLayout() {
             to="/profile"
             className="flex items-center gap-3 p-2 rounded-2xl hover:bg-white transition-colors border border-transparent hover:border-slate-200"
           >
-            <div className="w-9 h-9 rounded-xl bg-slate-900 text-white font-black text-xs flex items-center justify-center shadow-xs shrink-0">
-              {currentUser?.avatar || currentUser?.name?.charAt(0)?.toUpperCase() || 'U'}
+            <div className="w-9 h-9 rounded-full bg-slate-900 text-white font-black text-xs flex items-center justify-center shadow-xs shrink-0">
+              {userInitial}
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-1.5">
@@ -416,20 +421,16 @@ export function MainLayout() {
               </div>
             </Link>
 
-            {/* Logged in User Profile Chip: Toggles little menu */}
+            {/* Logged in User Profile Avatar: Circle with initial */}
             <div className="relative" ref={userMenuRef}>
               <button
                 type="button"
                 onClick={() => setShowUserMenu(!showUserMenu)}
-                className="flex items-center gap-2 p-1.5 pl-2.5 rounded-xl bg-slate-100 hover:bg-slate-200/80 active:scale-95 transition-all border border-slate-200 text-xs shadow-2xs group shrink-0 cursor-pointer"
-                title="Account menu"
+                className="w-9 h-9 rounded-full bg-black hover:bg-slate-800 active:scale-95 text-white font-black text-xs flex items-center justify-center shadow-xs border border-slate-200 shrink-0 cursor-pointer transition-transform"
+                title={currentUser?.name || 'Account menu'}
+                aria-label="Account menu"
               >
-                <span className="font-extrabold text-slate-900 text-xs">
-                  {currentUser?.name || 'User'}
-                </span>
-                <div className="w-8 h-8 rounded-lg bg-black text-white font-black text-xs flex items-center justify-center shadow-xs group-hover:bg-slate-800 transition-colors shrink-0">
-                  {currentUser?.name ? currentUser.name.charAt(0).toUpperCase() : 'U'}
-                </div>
+                {userInitial}
               </button>
 
               {/* Mobile Little Menu */}
@@ -442,16 +443,21 @@ export function MainLayout() {
                   />
                   <div className="absolute right-0 top-full mt-2 w-64 bg-white rounded-2xl shadow-xl border border-slate-200 z-50 p-2 animate-in fade-in zoom-in-95 duration-100 text-slate-800">
                     {/* User Info Header */}
-                    <div className="p-3 border-b border-slate-100 bg-slate-50/80 rounded-xl mb-1.5">
-                      <div className="font-black text-slate-900 text-sm truncate">
-                        {currentUser?.name || 'User'}
+                    <div className="p-3 border-b border-slate-100 bg-slate-50/80 rounded-xl mb-1.5 flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-full bg-black text-white font-black text-sm flex items-center justify-center shadow-xs shrink-0">
+                        {userInitial}
                       </div>
-                      <div className="text-[11px] text-slate-500 truncate mb-1.5">
-                        {currentUser?.email || clerkUser?.primaryEmailAddress?.emailAddress || ''}
+                      <div className="min-w-0 flex-1">
+                        <div className="font-black text-slate-900 text-sm truncate">
+                          {currentUser?.name || 'User'}
+                        </div>
+                        <div className="text-[11px] text-slate-500 truncate mb-1">
+                          {currentUser?.email || clerkUser?.primaryEmailAddress?.emailAddress || ''}
+                        </div>
+                        <Badge variant={isOwner ? 'purple' : 'info'} className="text-[10px] px-2 py-0.5 font-bold">
+                          {isOwner ? '👑 Organization Owner' : '👤 Salesperson'}
+                        </Badge>
                       </div>
-                      <Badge variant={isOwner ? 'purple' : 'info'} className="text-[10px] px-2 py-0.5 font-bold">
-                        {isOwner ? '👑 Organization Owner' : '👤 Salesperson'}
-                      </Badge>
                     </div>
 
                     {/* Menu Options */}
@@ -519,13 +525,11 @@ export function MainLayout() {
               <button
                 type="button"
                 onClick={() => setShowUserMenu(!showUserMenu)}
-                className="flex items-center gap-2 p-1.5 pr-3 rounded-xl hover:bg-slate-100 transition-colors border border-slate-200 text-xs font-bold text-slate-700 cursor-pointer"
+                className="w-9 h-9 rounded-full bg-black hover:bg-slate-800 active:scale-95 text-white font-black text-xs flex items-center justify-center shadow-xs border border-slate-200 shrink-0 cursor-pointer transition-transform"
+                title={currentUser?.name || 'Account menu'}
+                aria-label="Account menu"
               >
-                <div className="w-6 h-6 rounded-lg bg-black text-white flex items-center justify-center font-extrabold text-[10px]">
-                  {currentUser?.avatar || currentUser?.name?.charAt(0)?.toUpperCase() || 'U'}
-                </div>
-                <span>{currentUser?.name || 'User'}</span>
-                <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+                {userInitial}
               </button>
 
               {/* Desktop Little Menu */}
@@ -537,16 +541,21 @@ export function MainLayout() {
                     onTouchStart={() => setShowUserMenu(false)}
                   />
                   <div className="absolute right-0 top-full mt-2 w-64 bg-white rounded-2xl shadow-xl border border-slate-200 z-50 p-2 animate-in fade-in zoom-in-95 duration-100 text-slate-800">
-                    <div className="p-3 border-b border-slate-100 bg-slate-50/80 rounded-xl mb-1.5">
-                      <div className="font-black text-slate-900 text-sm truncate">
-                        {currentUser?.name || 'User'}
+                    <div className="p-3 border-b border-slate-100 bg-slate-50/80 rounded-xl mb-1.5 flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-full bg-black text-white font-black text-sm flex items-center justify-center shadow-xs shrink-0">
+                        {userInitial}
                       </div>
-                      <div className="text-[11px] text-slate-500 truncate mb-1.5">
-                        {currentUser?.email || clerkUser?.primaryEmailAddress?.emailAddress || ''}
+                      <div className="min-w-0 flex-1">
+                        <div className="font-black text-slate-900 text-sm truncate">
+                          {currentUser?.name || 'User'}
+                        </div>
+                        <div className="text-[11px] text-slate-500 truncate mb-1">
+                          {currentUser?.email || clerkUser?.primaryEmailAddress?.emailAddress || ''}
+                        </div>
+                        <Badge variant={isOwner ? 'purple' : 'info'} className="text-[10px] px-2 py-0.5 font-bold">
+                          {isOwner ? '👑 Organization Owner' : '👤 Salesperson'}
+                        </Badge>
                       </div>
-                      <Badge variant={isOwner ? 'purple' : 'info'} className="text-[10px] px-2 py-0.5 font-bold">
-                        {isOwner ? '👑 Organization Owner' : '👤 Salesperson'}
-                      </Badge>
                     </div>
 
                     <div className="space-y-1">
