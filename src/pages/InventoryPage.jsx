@@ -1204,6 +1204,37 @@ export function InventoryPage() {
         return
       }
 
+      if (!isOwner || requireTelegramApproval) {
+        const st = stores.find(s => s.id === purchaseForm.storeId)
+        await submitDirectPurchaseRequest({
+          destinationLocationType: 'store',
+          destinationLocationId: purchaseForm.storeId,
+          destinationName: st?.name || 'Store',
+          items: validItems,
+          paymentMethod: purchaseForm.paymentMethod,
+          bankProvider: bankProviderName,
+          supplierName: purchaseForm.supplierName,
+        })
+        setIsPurchaseModalOpen(false)
+        toast.info(
+          'Approval Request Sent',
+          `Direct purchase request for ${validItems.length} items sent to Owner on Telegram for review.`
+        )
+        setBulkPurchaseItems([
+          {
+            id: `bulk-purch-${Date.now()}`,
+            isNewProduct: false,
+            productId: products[0]?.id || '',
+            quantity: '10',
+            costPerUnit: products[0]?.costPrice || '20',
+            newProductName: '',
+            newProductCategory: 'General',
+            newProductSellingPrice: '30'
+          }
+        ])
+        return
+      }
+
       await recordDirectPurchase({
         storeId: purchaseForm.storeId,
         items: validItems,
@@ -1235,6 +1266,7 @@ export function InventoryPage() {
 
     // Single item mode
     let targetProductId = purchaseForm.productId
+    let targetProductName = ''
 
     if (isPurchaseCreatingNewProduct) {
       if (!purchaseForm.newProductName.trim()) {
@@ -1254,6 +1286,45 @@ export function InventoryPage() {
         return
       }
       targetProductId = created.id
+      targetProductName = created.name
+    } else {
+      const prod = products.find(p => p.id === targetProductId)
+      targetProductName = prod?.name || 'Product'
+    }
+
+    const singleCost = parseFloat(isPurchaseCreatingNewProduct ? purchaseForm.newProductCostPrice : purchaseForm.costPerUnit) || 0
+    const singleQty = parseInt(purchaseForm.quantity, 10) || 1
+
+    if (!isOwner || requireTelegramApproval) {
+      const stObj = stores.find(s => s.id === purchaseForm.storeId)
+      await submitDirectPurchaseRequest({
+        destinationLocationType: 'store',
+        destinationLocationId: purchaseForm.storeId,
+        destinationName: stObj?.name || 'Store',
+        items: [{
+          productId: targetProductId,
+          productName: targetProductName,
+          quantity: singleQty,
+          costPerUnit: singleCost,
+        }],
+        paymentMethod: purchaseForm.paymentMethod,
+        bankProvider: bankProviderName,
+        supplierName: purchaseForm.supplierName,
+      })
+
+      setIsPurchaseModalOpen(false)
+      setIsPurchaseCreatingNewProduct(false)
+      toast.info(
+        'Approval Request Sent',
+        `Direct purchase request for ${singleQty} units of "${targetProductName}" sent to Owner on Telegram for review.`
+      )
+      setPurchaseForm(prev => ({
+        ...prev,
+        quantity: '10',
+        supplierName: '',
+        newProductName: '',
+      }))
+      return
     }
 
     await recordDirectPurchase({
@@ -1307,27 +1378,69 @@ export function InventoryPage() {
     if (initQty > 0 && standaloneProductForm.initialDestination !== 'none') {
       if (standaloneProductForm.initialDestination === 'warehouse') {
         const whId = standaloneProductForm.initialDestinationId || warehouses[0]?.id
+        const whObj = warehouses.find(w => w.id === whId)
         if (whId) {
-          await recordWarehouseInbound({
-            warehouseId: whId,
-            productId: created.id,
-            quantity: initQty,
-            costPerUnit: standaloneProductForm.costPrice,
-            paymentMethod: 'Cash',
-            supplierName: 'Initial Product Stocking'
-          }, currentUser)
+          if (!isOwner || requireTelegramApproval) {
+            await submitDirectPurchaseRequest({
+              destinationLocationType: 'warehouse',
+              destinationLocationId: whId,
+              destinationName: whObj?.name || 'Warehouse',
+              items: [{
+                productId: created.id,
+                productName: created.name,
+                quantity: initQty,
+                costPerUnit: parseFloat(standaloneProductForm.costPrice) || 0,
+              }],
+              paymentMethod: 'Cash',
+              supplierName: 'Initial Product Stocking',
+            })
+            toast.info(
+              'Stock Approval Request Sent',
+              `Initial stocking of ${initQty} units for "${created.name}" sent to Owner on Telegram for approval.`
+            )
+          } else {
+            await recordWarehouseInbound({
+              warehouseId: whId,
+              productId: created.id,
+              quantity: initQty,
+              costPerUnit: standaloneProductForm.costPrice,
+              paymentMethod: 'Cash',
+              supplierName: 'Initial Product Stocking'
+            }, currentUser)
+          }
         }
       } else if (standaloneProductForm.initialDestination === 'store') {
         const stId = standaloneProductForm.initialDestinationId || stores[0]?.id
+        const stObj = stores.find(s => s.id === stId)
         if (stId) {
-          await recordDirectPurchase({
-            storeId: stId,
-            productId: created.id,
-            quantity: initQty,
-            costPerUnit: standaloneProductForm.costPrice,
-            paymentMethod: 'Cash',
-            supplierName: 'Initial Product Stocking'
-          }, currentUser)
+          if (!isOwner || requireTelegramApproval) {
+            await submitDirectPurchaseRequest({
+              destinationLocationType: 'store',
+              destinationLocationId: stId,
+              destinationName: stObj?.name || 'Store',
+              items: [{
+                productId: created.id,
+                productName: created.name,
+                quantity: initQty,
+                costPerUnit: parseFloat(standaloneProductForm.costPrice) || 0,
+              }],
+              paymentMethod: 'Cash',
+              supplierName: 'Initial Product Stocking',
+            })
+            toast.info(
+              'Stock Approval Request Sent',
+              `Initial stocking of ${initQty} units for "${created.name}" sent to Owner on Telegram for approval.`
+            )
+          } else {
+            await recordDirectPurchase({
+              storeId: stId,
+              productId: created.id,
+              quantity: initQty,
+              costPerUnit: standaloneProductForm.costPrice,
+              paymentMethod: 'Cash',
+              supplierName: 'Initial Product Stocking'
+            }, currentUser)
+          }
         }
       }
     }
