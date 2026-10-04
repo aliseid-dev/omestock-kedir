@@ -469,6 +469,35 @@ export function InventoryPage() {
     newProductMinThreshold: '10',
   })
 
+  // Auto-sync initial select values once data loads from Convex
+  useEffect(() => {
+    if (warehouses.length > 0 && !transferForm.fromWarehouseId) {
+      setTransferForm(prev => ({ ...prev, fromWarehouseId: warehouses[0].id }))
+    }
+  }, [warehouses, transferForm.fromWarehouseId])
+
+  useEffect(() => {
+    if (stores.length > 0 && !transferForm.toStoreId) {
+      setTransferForm(prev => ({ ...prev, toStoreId: stores[0].id }))
+    }
+    if (stores.length > 0 && !purchaseForm.storeId) {
+      setPurchaseForm(prev => ({ ...prev, storeId: stores[0].id }))
+    }
+  }, [stores, transferForm.toStoreId, purchaseForm.storeId])
+
+  useEffect(() => {
+    if (products.length > 0 && !transferForm.productId) {
+      setTransferForm(prev => ({ ...prev, productId: products[0].id }))
+    }
+    if (products.length > 0 && !purchaseForm.productId) {
+      setPurchaseForm(prev => ({
+        ...prev,
+        productId: products[0].id,
+        costPerUnit: products[0].costPrice || '20',
+      }))
+    }
+  }, [products, transferForm.productId, purchaseForm.productId])
+
   const [overrideForm, setOverrideForm] = useState({
     locationId: '',
     locationName: '',
@@ -529,10 +558,14 @@ export function InventoryPage() {
   // Submit Stock Transfer (One product at a time)
   const handleTransferSubmit = async (e) => {
     e.preventDefault()
-    const wh = warehouses.find(w => w.id === transferForm.fromWarehouseId)
+    const fromWhId = transferForm.fromWarehouseId || warehouses[0]?.id
+    const toStId = transferForm.toStoreId || stores[0]?.id
+    const prodId = transferForm.productId || products[0]?.id
+
+    const wh = warehouses.find(w => w.id === fromWhId) || warehouses[0]
     const qty = parseInt(transferForm.quantity, 10) || 0
 
-    if (!transferForm.productId) {
+    if (!prodId) {
       toast.warning('Product Required', 'Please select a product to transfer.')
       return
     }
@@ -542,26 +575,26 @@ export function InventoryPage() {
       return
     }
 
-    const available = wh?.stock?.[transferForm.productId] || 0
+    const available = wh?.stock?.[prodId] || 0
     if (qty > available) {
-      const prod = products.find(p => p.id === transferForm.productId)
+      const prod = products.find(p => p.id === prodId)
       toast.error('Stock Exceeded', `Transfer quantity (${qty}) exceeds available warehouse stock (${available}) for "${prod?.name || 'Product'}".`)
       return
     }
 
-    const prod = products.find(p => p.id === transferForm.productId)
-    const targetStore = stores.find(s => s.id === transferForm.toStoreId)
+    const prod = products.find(p => p.id === prodId)
+    const targetStore = stores.find(s => s.id === toStId) || stores[0]
 
     if (!isOwner || requireTelegramApproval) {
       await submitTransferRequest({
-        fromWarehouseId: transferForm.fromWarehouseId,
-        toStoreId: transferForm.toStoreId,
+        fromWarehouseId: fromWhId,
+        toStoreId: toStId,
         sourceName: wh?.name || 'Warehouse',
         destinationName: targetStore?.name || 'Store',
         items: [
           {
-            productId: transferForm.productId,
-            productName: prod?.name || transferForm.productId,
+            productId: prodId,
+            productName: prod?.name || prodId,
             quantity: qty,
           }
         ],
@@ -579,12 +612,12 @@ export function InventoryPage() {
     }
 
     const success = await transferStock({
-      fromWarehouseId: transferForm.fromWarehouseId,
-      toStoreId: transferForm.toStoreId,
+      fromWarehouseId: fromWhId,
+      toStoreId: toStId,
       items: [
         {
-          productId: transferForm.productId,
-          productName: prod?.name || transferForm.productId,
+          productId: prodId,
+          productName: prod?.name || prodId,
           quantity: qty,
         }
       ],

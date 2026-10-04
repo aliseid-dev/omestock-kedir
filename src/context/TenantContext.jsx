@@ -542,8 +542,23 @@ export function TenantProvider({ children }) {
   }) => {
     if (!clientId) return null
     try {
-      const isFromWarehouse = Boolean(fromWarehouseId)
+      const isFromWarehouse = fromWarehouseId !== undefined ? Boolean(fromWarehouseId) : true
       const isToWarehouse = Boolean(toWarehouseId)
+
+      const effectiveFromId = fromWarehouseId || fromStoreId || (isFromWarehouse ? warehouses[0]?.id : stores[0]?.id)
+      const effectiveToId = toWarehouseId || toStoreId || (isToWarehouse ? warehouses[0]?.id : stores[0]?.id)
+
+      const effectiveSourceName =
+        sourceName ||
+        (isFromWarehouse
+          ? warehouses.find((w) => w.id === effectiveFromId)?.name || 'Warehouse'
+          : stores.find((s) => s.id === effectiveFromId)?.name || 'Store')
+
+      const effectiveDestName =
+        destinationName ||
+        (isToWarehouse
+          ? warehouses.find((w) => w.id === effectiveToId)?.name || 'Warehouse'
+          : stores.find((s) => s.id === effectiveToId)?.name || 'Store')
 
       const formattedItems = (items || []).map((it) => {
         const prod = products.find((p) => p.id === it.productId)
@@ -559,11 +574,11 @@ export function TenantProvider({ children }) {
         clientId,
         type: 'transfer',
         sourceLocationType: isFromWarehouse ? 'warehouse' : 'store',
-        sourceLocationId: fromWarehouseId || fromStoreId,
-        sourceLocationName: sourceName,
+        sourceLocationId: effectiveFromId,
+        sourceLocationName: effectiveSourceName,
         destinationLocationType: isToWarehouse ? 'warehouse' : 'store',
-        destinationLocationId: toWarehouseId || toStoreId,
-        destinationLocationName: destinationName,
+        destinationLocationId: effectiveToId,
+        destinationLocationName: effectiveDestName,
         items: formattedItems,
         notes: notes || undefined,
         requestedByUserId: currentUser?.id || 'staff',
@@ -629,12 +644,21 @@ export function TenantProvider({ children }) {
         0
       )
 
+      const effectiveDestId =
+        destinationLocationId ||
+        (destinationLocationType === 'warehouse' ? warehouses[0]?.id : stores[0]?.id)
+      const effectiveDestName =
+        destinationName ||
+        (destinationLocationType === 'warehouse'
+          ? warehouses.find((w) => w.id === effectiveDestId)?.name || 'Warehouse'
+          : stores.find((s) => s.id === effectiveDestId)?.name || 'Store')
+
       const requestId = await createApprovalRequestMutation({
         clientId,
         type: 'direct_purchase',
         destinationLocationType,
-        destinationLocationId,
-        destinationLocationName: destinationName,
+        destinationLocationId: effectiveDestId,
+        destinationLocationName: effectiveDestName,
         items: formattedItems,
         paymentMethod: paymentMethod || 'Cash',
         bankProvider: bankProvider || undefined,
