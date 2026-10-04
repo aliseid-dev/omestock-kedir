@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useMemo, useEffect } from 'react'
-import { useQuery, useMutation } from 'convex/react'
+import { useQuery, useMutation, useAction } from 'convex/react'
 import { api } from '../../convex/_generated/api'
 import { useAuth } from './AuthContext'
 
@@ -84,6 +84,16 @@ export function TenantProvider({ children }) {
     clientId ? { clientId } : 'skip'
   )
 
+  const pendingApprovalsData = useQuery(
+    api.approvals.getPendingApprovals,
+    clientId ? { clientId } : 'skip'
+  )
+
+  const approvalHistoryData = useQuery(
+    api.approvals.getAllApprovals,
+    clientId ? { clientId } : 'skip'
+  )
+
   // Realtime Convex Mutations
   const createProductMutation = useMutation(api.inventory.createProduct)
   const updateProductMutation = useMutation(api.inventory.updateProduct)
@@ -107,6 +117,13 @@ export function TenantProvider({ children }) {
   const wipeClientAndResetMutation = useMutation(api.users.wipeClientAndReset)
   const wipeEntireDatabaseMutation = useMutation(api.users.wipeEntireDatabase)
   const deleteUserAccountMutation = useMutation(api.users.deleteUserAccount)
+
+  // Approvals & Telegram Actions
+  const createApprovalRequestMutation = useMutation(api.approvals.createApprovalRequest)
+  const approveRequestMutation = useMutation(api.approvals.approveRequest)
+  const rejectRequestMutation = useMutation(api.approvals.rejectRequest)
+  const dispatchTelegramApprovalAction = useAction(api.telegram.dispatchTelegramApproval)
+  const updateTelegramApprovalMessageAction = useAction(api.telegram.updateTelegramApprovalMessage)
 
   // Auto-normalize location names (e.g. Central Distribution Hub -> Warehouse, Retail Store #1 -> Store 1)
   useEffect(() => {
@@ -192,6 +209,24 @@ export function TenantProvider({ children }) {
       id: l._id,
     }))
   }, [auditLogsData])
+
+  // Format pending approvals
+  const pendingApprovals = useMemo(() => {
+    if (!pendingApprovalsData) return []
+    return pendingApprovalsData.map((r) => ({
+      ...r,
+      id: r._id,
+    }))
+  }, [pendingApprovalsData])
+
+  // Format approval history
+  const approvalHistory = useMemo(() => {
+    if (!approvalHistoryData) return []
+    return approvalHistoryData.map((r) => ({
+      ...r,
+      id: r._id,
+    }))
+  }, [approvalHistoryData])
 
   // Active Organization Details
   const activeOrg = useMemo(() => {
@@ -493,6 +528,173 @@ export function TenantProvider({ children }) {
     }
   }
 
+  // ─── Approval Requests & Telegram Notifications ─────────────────────────
+
+  const submitTransferRequest = async ({
+    fromWarehouseId,
+    fromStoreId,
+    toStoreId,
+    toWarehouseId,
+    sourceName,
+    destinationName,
+    items,
+    notes,
+  }) => {
+    if (!clientId) return null
+    try {
+      const isFromWarehouse = Boolean(fromWarehouseId)
+      const isToWarehouse = Boolean(toWarehouseId)
+
+      const formattedItems = (items || []).map((it) => {
+        const prod = products.find((p) => p.id === it.productId)
+        return {
+          productId: it.productId,
+          productName: it.productName || prod?.name || 'Product',
+          productCode: prod?.code || '',
+          quantity: parseInt(it.quantity, 10) || 1,
+        }
+      })
+
+      const requestId = await createApprovalRequestMutation({
+        clientId,
+        type: 'transfer',
+        sourceLocationType: isFromWarehouse ? 'warehouse' : 'store',
+        sourceLocationId: fromWarehouseId || fromStoreId,
+        sourceLocationName: sourceName,
+        destinationLocationType: isToWarehouse ? 'warehouse' : 'store',
+        destinationLocationId: toWarehouseId || toStoreId,
+        destinationLocationName: destinationName,
+        items: formattedItems,
+        notes: notes || undefined,
+        requestedByUserId: currentUser?.id || 'staff',
+        requestedByUserName: currentUser?.name || currentUser?.email || 'Staff Member',
+        requestedByUserEmail: currentUser?.email || undefined,
+      })
+
+      // Send interactive Telegram approval notification to owner
+      const itemsSummary = formattedItems
+        .map((it) => `• <b>${it.productName}</b>: <code>${it.quantity}</code> units`)
+        .join('\n')
+
+      dispatchTelegramApprovalAction({
+        requestId,
+        type: 'transfer',
+        requestedByName: currentUser?.name || currentUser?.email || 'Staff Member',
+        sourceName,
+        destinationName,
+        itemsSummary,
+        notes: notes || undefined,
+      }).catch((err) => console.error('Telegram dispatch error:', err))
+
+      return requestId
+    } catch (err) {
+      console.error('submitTransferRequest failed:', err)
+      throw err
+    }
+  }
+
+  const submitDirectPurchaseRequest = async ({
+    destinationLocationType = 'store',
+    destinationLocationId,
+    destinationName,
+    items,
+    paymentMethod,
+    bankProvider,
+    supplierName,
+    notes,
+  }) => {
+    if (!clientId) return null
+    try {
+      const formattedItems = (items || []).map((it) => {
+        const prod = products.find((p) => p.id === it.productId)
+        const cost = parseFloat(it.costPerUnit) || parseFloat(it.costPrice) || prod?.costPrice || 0
+        return {
+          productId: it.productId,
+          productName: it.productName || prod?.name || 'Product',
+          productCode: prod?.code || '',
+          quantity: parseInt(it.quantity, 10) || 1,
+          costPerUnit: cost,
+        }
+      })
+
+      const totalCost = formattedItems.reduce(
+        (sum, it) => sum + (it.quantity * (it.costPerUnit || 0)),
+        0
+      )
+
+      const requestId = await createApprovalRequestMutation({
+        clientId,
+        type: 'direct_purchase',
+        destinationLocationType,
+        destinationLocationId,
+        destinationLocationName: destinationName,
+        items: formattedItems,
+        paymentMethod: paymentMethod || 'Cash',
+        bankProvider: bankProvider || undefined,
+        supplierName: supplierName || undefined,
+        totalCost,
+        notes: notes || undefined,
+        requestedByUserId: currentUser?.id || 'staff',
+        requestedByUserName: currentUser?.name || currentUser?.email || 'Staff Member',
+        requestedByUserEmail: currentUser?.email || undefined,
+      })
+
+      // Send interactive Telegram approval notification to owner
+      const itemsSummary = formattedItems
+        .map(
+          (it) =>
+            `• <b>${it.productName}</b>: <code>${it.quantity}</code> units @ ${(it.costPerUnit || 0).toLocaleString()} ETB`
+        )
+        .join('\n')
+
+      dispatchTelegramApprovalAction({
+        requestId,
+        type: 'direct_purchase',
+        requestedByName: currentUser?.name || currentUser?.email || 'Staff Member',
+        destinationName,
+        itemsSummary,
+        totalCost,
+        paymentMethod: paymentMethod || 'Cash',
+        supplierName: supplierName || undefined,
+        notes: notes || undefined,
+      }).catch((err) => console.error('Telegram dispatch error:', err))
+
+      return requestId
+    } catch (err) {
+      console.error('submitDirectPurchaseRequest failed:', err)
+      throw err
+    }
+  }
+
+  const approveApprovalRequest = async (requestId) => {
+    try {
+      const res = await approveRequestMutation({
+        requestId,
+        reviewerUserId: currentUser?.id || 'owner',
+        reviewerUserName: currentUser?.name || currentUser?.email || 'Owner',
+      })
+      return res
+    } catch (err) {
+      console.error('approveApprovalRequest failed:', err)
+      throw err
+    }
+  }
+
+  const rejectApprovalRequest = async (requestId, reason) => {
+    try {
+      const res = await rejectRequestMutation({
+        requestId,
+        reviewerUserId: currentUser?.id || 'owner',
+        reviewerUserName: currentUser?.name || currentUser?.email || 'Owner',
+        reason: reason || undefined,
+      })
+      return res
+    } catch (err) {
+      console.error('rejectApprovalRequest failed:', err)
+      throw err
+    }
+  }
+
   // ─── Sales Actions ───────────────────────────────────────────────────────
 
   const recordSale = async (saleData, currentStaff) => {
@@ -763,6 +965,8 @@ export function TenantProvider({ children }) {
         sales,
         staff,
         auditLogs,
+        pendingApprovals,
+        approvalHistory,
         loading,
         isFirebaseLive: true,
         // Methods
@@ -773,6 +977,10 @@ export function TenantProvider({ children }) {
         transferStock,
         recordWarehouseInbound,
         recordDirectPurchase,
+        submitTransferRequest,
+        submitDirectPurchaseRequest,
+        approveApprovalRequest,
+        rejectApprovalRequest,
         recordSale,
         settleCreditSale,
         overrideStock,

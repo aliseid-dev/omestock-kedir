@@ -34,7 +34,12 @@ import {
   Smartphone,
   Banknote,
   Table as TableIcon,
-  LayoutGrid
+  LayoutGrid,
+  Bell,
+  Send,
+  Clock,
+  CheckCircle,
+  XCircle
 } from 'lucide-react'
 import { useTenant } from '../context/TenantContext'
 import { useAuth } from '../context/AuthContext'
@@ -223,13 +228,22 @@ export function InventoryPage() {
     updateProduct,
     seedSampleInventory,
     addStore,
-    deleteStore
+    deleteStore,
+    pendingApprovals,
+    approvalHistory,
+    submitTransferRequest,
+    submitDirectPurchaseRequest,
+    approveApprovalRequest,
+    rejectApprovalRequest
   } = useTenant()
   const { currentUser, isOwner } = useAuth()
   const { toast } = useToast()
 
   const [stockViewMode, setStockViewMode] = useState('table') // 'table' | 'cards'
   const [isSeeding, setIsSeeding] = useState(false)
+  const [isApprovalsModalOpen, setIsApprovalsModalOpen] = useState(false)
+  const [processingApprovalId, setProcessingApprovalId] = useState(null)
+  const [requireTelegramApproval, setRequireTelegramApproval] = useState(!isOwner)
 
   const handleSeedSampleData = async () => {
     if (!confirm('Load 15 sample items from Kaya Yasmin Auto Parts into warehouse and store?')) return
@@ -535,6 +549,33 @@ export function InventoryPage() {
 
     const prod = products.find(p => p.id === transferForm.productId)
     const targetStore = stores.find(s => s.id === transferForm.toStoreId)
+
+    if (!isOwner || requireTelegramApproval) {
+      await submitTransferRequest({
+        fromWarehouseId: transferForm.fromWarehouseId,
+        toStoreId: transferForm.toStoreId,
+        sourceName: wh?.name || 'Warehouse',
+        destinationName: targetStore?.name || 'Store',
+        items: [
+          {
+            productId: transferForm.productId,
+            productName: prod?.name || transferForm.productId,
+            quantity: qty,
+          }
+        ],
+      })
+      setIsTransferModalOpen(false)
+      toast.info(
+        'Approval Request Sent',
+        `Transfer request for ${qty} unit${qty > 1 ? 's' : ''} sent to Owner on Telegram for review.`
+      )
+      setTransferForm(prev => ({
+        ...prev,
+        quantity: '5'
+      }))
+      return
+    }
+
     const success = await transferStock({
       fromWarehouseId: transferForm.fromWarehouseId,
       toStoreId: transferForm.toStoreId,
@@ -733,6 +774,35 @@ export function InventoryPage() {
     }
 
     const prod = products.find(p => p.id === productId)
+    const targetWh = toWarehouseId ? warehouses.find(w => w.id === toWarehouseId) : null
+    const targetSt = toStoreId ? stores.find(s => s.id === toStoreId) : null
+    const destName = targetWh?.name || targetSt?.name || 'Destination'
+
+    if (!isOwner || requireTelegramApproval) {
+      await submitTransferRequest({
+        fromWarehouseId: activeLocation.id,
+        toWarehouseId: toWarehouseId || undefined,
+        toStoreId: toStoreId || undefined,
+        sourceName: activeLocation.name,
+        destinationName: destName,
+        items: [{
+          productId,
+          productName: prod?.name || productId,
+          quantity: qty,
+        }],
+        notes: warehouseTransferForm.notes,
+      })
+      setIsWarehouseTransferOpen(false)
+      toast.info(
+        'Approval Request Sent',
+        `Transfer request for ${qty} unit${qty > 1 ? 's' : ''} sent to Owner on Telegram for review.`
+      )
+      setWarehouseTransferForm(prev => ({
+        ...prev,
+        quantity: '5',
+      }))
+      return
+    }
 
     const success = await transferStock({
       fromWarehouseId: activeLocation.id,
@@ -861,9 +931,38 @@ export function InventoryPage() {
       ? telebirrReference
       : ''
 
-    const supplierStr = supplierName
-      ? `${supplierName}${ref ? ` (Ref: ${ref})` : ''}`
-      : (ref ? `Ref: ${ref}` : undefined)
+    if (!isOwner || requireTelegramApproval) {
+      await submitDirectPurchaseRequest({
+        destinationLocationType: activeLocationType || 'store',
+        destinationLocationId: activeLocation.id,
+        destinationName: activeLocation.name,
+        items: [{
+          productId: targetProductId,
+          productName: targetProductName,
+          quantity: qty,
+          costPerUnit: cost,
+        }],
+        paymentMethod,
+        bankProvider: bankProviderName,
+        supplierName: supplierStr,
+      })
+      setIsStoreDirectPurchaseOpen(false)
+      setIsStorePurchaseNewProduct(false)
+      toast.info(
+        'Approval Request Sent',
+        `Direct purchase request for ${qty} unit${qty > 1 ? 's' : ''} of "${targetProductName}" sent to Owner on Telegram for review.`
+      )
+      setStoreDirectPurchaseForm(prev => ({
+        ...prev,
+        productId: '',
+        quantity: '10',
+        supplierName: '',
+        bankReference: '',
+        telebirrReference: '',
+        newProductName: '',
+      }))
+      return
+    }
 
     const success = await recordDirectPurchase({
       storeId: activeLocation.id,
@@ -926,6 +1025,35 @@ export function InventoryPage() {
     }
 
     const prod = products.find(p => p.id === productId)
+    const targetWh = toWarehouseId ? warehouses.find(w => w.id === toWarehouseId) : null
+    const targetSt = toStoreId ? stores.find(s => s.id === toStoreId) : null
+    const destName = targetWh?.name || targetSt?.name || 'Destination'
+
+    if (!isOwner || requireTelegramApproval) {
+      await submitTransferRequest({
+        fromStoreId: activeLocation.id,
+        toWarehouseId: toWarehouseId || undefined,
+        toStoreId: toStoreId || undefined,
+        sourceName: activeLocation.name,
+        destinationName: destName,
+        items: [{
+          productId,
+          productName: prod?.name || productId,
+          quantity: qty,
+        }],
+        notes: storeTransferForm.notes,
+      })
+      setIsStoreTransferOpen(false)
+      toast.info(
+        'Approval Request Sent',
+        `Transfer request for ${qty} unit${qty > 1 ? 's' : ''} sent to Owner on Telegram for review.`
+      )
+      setStoreTransferForm(prev => ({
+        ...prev,
+        quantity: '5',
+      }))
+      return
+    }
 
     const success = await transferStock({
       fromStoreId: activeLocation.id,
@@ -1242,6 +1370,37 @@ export function InventoryPage() {
 
   return (
     <div className="space-y-5 pb-28 sm:pb-8 animate-in fade-in duration-200">
+      {/* Telegram Approvals Banner for Owner */}
+      {isOwner && pendingApprovals?.length > 0 && (
+        <div className="p-3.5 sm:p-4 bg-gradient-to-r from-blue-900 to-indigo-900 text-white rounded-2xl shadow-lg flex flex-col sm:flex-row sm:items-center justify-between gap-3 border border-blue-800">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-blue-500/30 border border-blue-400/40 text-blue-300 flex items-center justify-center font-bold shrink-0">
+              <Bell className="w-5 h-5 animate-pulse text-blue-200" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="font-black text-sm text-white">
+                  {pendingApprovals.length} Pending Approval Request{pendingApprovals.length > 1 ? 's' : ''}
+                </span>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-400 text-amber-950">
+                  Telegram & Web
+                </span>
+              </div>
+              <p className="text-xs text-blue-200 mt-0.5">
+                Staff have submitted stock transfers or direct purchases requiring your approval.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsApprovalsModalOpen(true)}
+            className="py-2 px-4 rounded-xl bg-white text-blue-900 hover:bg-blue-50 font-bold text-xs shadow-md transition-all shrink-0 cursor-pointer text-center"
+          >
+            Review & Approve ({pendingApprovals.length})
+          </button>
+        </div>
+      )}
+
       {!activeLocation ? (
         /* ═════════════════════════════════════════════════════════════════════ */
         /* VIEW 1: LOCATIONS HUB (AVAILABLE STORES & MAIN WAREHOUSE)            */
@@ -3998,6 +4157,149 @@ export function InventoryPage() {
               </Button>
             </div>
           </form>
+        </Modal>
+      )}
+
+      {/* Pending Approvals Review Modal */}
+      {isApprovalsModalOpen && (
+        <Modal
+          isOpen={isApprovalsModalOpen}
+          onClose={() => setIsApprovalsModalOpen(false)}
+          title="Pending Approval Requests"
+        >
+          <div className="space-y-4">
+            <p className="text-xs text-slate-500">
+              Review requests submitted by staff members. You can approve or reject them here or directly via Telegram.
+            </p>
+
+            {(!pendingApprovals || pendingApprovals.length === 0) ? (
+              <div className="text-center py-8 text-slate-400">
+                <CheckCircle className="w-12 h-12 text-emerald-500 mx-auto mb-2 opacity-80" />
+                <p className="font-bold text-slate-700">All caught up!</p>
+                <p className="text-xs">No pending transfer or direct purchase requests.</p>
+              </div>
+            ) : (
+              <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
+                {pendingApprovals.map((req) => {
+                  const isTransfer = req.type === 'transfer'
+                  const isProcessing = processingApprovalId === req.id
+
+                  return (
+                    <div
+                      key={req.id}
+                      className="p-4 rounded-2xl border border-slate-200 bg-white shadow-xs space-y-3 hover:border-slate-300 transition-all"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <Badge
+                              variant={isTransfer ? 'blue' : 'purple'}
+                              className="font-bold text-[10px] uppercase tracking-wider"
+                            >
+                              {isTransfer ? 'Stock Transfer' : 'Direct Purchase'}
+                            </Badge>
+                            <span className="text-[11px] text-slate-400 flex items-center gap-1">
+                              <Clock className="w-3 h-3" />
+                              {new Date(req.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          </div>
+                          <div className="font-bold text-slate-900 text-sm mt-1">
+                            {isTransfer ? (
+                              <span>{req.sourceLocationName || 'Warehouse'} &rarr; {req.destinationLocationName || 'Store'}</span>
+                            ) : (
+                              <span>Destination: {req.destinationLocationName || 'Store'}</span>
+                            )}
+                          </div>
+                          <div className="text-xs text-slate-500 mt-0.5">
+                            Requested by <span className="font-semibold text-slate-700">{req.requestedByUserName}</span>
+                            {req.supplierName && (
+                              <> • Supplier: <span className="font-semibold text-slate-700">{req.supplierName}</span></>
+                            )}
+                          </div>
+                        </div>
+
+                        {req.totalCost !== undefined && req.totalCost > 0 && (
+                          <div className="text-right">
+                            <div className="text-[10px] uppercase text-slate-400 font-bold">Total Cost</div>
+                            <div className="font-black text-slate-900 text-sm">
+                              {req.totalCost.toLocaleString()} ETB
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Items table / list */}
+                      <div className="bg-slate-50 rounded-xl p-2.5 border border-slate-100 space-y-1">
+                        {req.items?.map((it, idx) => (
+                          <div key={idx} className="flex items-center justify-between text-xs">
+                            <span className="font-medium text-slate-800">
+                              {it.productName}
+                            </span>
+                            <span className="font-bold text-slate-900">
+                              {it.quantity} units {it.costPerUnit ? `@ ${it.costPerUnit.toLocaleString()} ETB` : ''}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+
+                      {req.notes && (
+                        <div className="text-xs text-slate-600 bg-amber-50/60 p-2 rounded-lg border border-amber-100">
+                          <span className="font-bold text-amber-800">Notes:</span> {req.notes}
+                        </div>
+                      )}
+
+                      {/* Actions */}
+                      <div className="flex items-center justify-end gap-2 pt-1 border-t border-slate-100">
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          disabled={isProcessing}
+                          onClick={async () => {
+                            setProcessingApprovalId(req.id)
+                            try {
+                              await rejectApprovalRequest(req.id, 'Rejected by Owner in App')
+                              toast.info('Request Rejected', 'The request has been rejected.')
+                            } catch (err) {
+                              toast.error('Rejection Failed', err.message || 'Could not reject request.')
+                            } finally {
+                              setProcessingApprovalId(null)
+                            }
+                          }}
+                          className="text-rose-600 hover:bg-rose-50 border-rose-200"
+                        >
+                          <XCircle className="w-3.5 h-3.5 mr-1" />
+                          Reject
+                        </Button>
+
+                        <Button
+                          type="button"
+                          variant="primary"
+                          size="sm"
+                          disabled={isProcessing}
+                          onClick={async () => {
+                            setProcessingApprovalId(req.id)
+                            try {
+                              await approveApprovalRequest(req.id)
+                              toast.success('Request Approved', 'Stock has been updated automatically!')
+                            } catch (err) {
+                              toast.error('Approval Failed', err.message || 'Could not approve request.')
+                            } finally {
+                              setProcessingApprovalId(null)
+                            }
+                          }}
+                          className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                        >
+                          <CheckCircle className="w-3.5 h-3.5 mr-1" />
+                          {isProcessing ? 'Processing...' : 'Approve & Apply Stock'}
+                        </Button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
         </Modal>
       )}
 

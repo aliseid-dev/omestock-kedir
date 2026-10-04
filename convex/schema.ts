@@ -6,6 +6,10 @@ export default defineSchema({
   clients: defineTable({
     name: v.string(),
     companyCode: v.string(), // Unique 6-digit uppercase alphanumeric code, e.g. A7X9M2
+    telegramBotToken: v.optional(v.string()),
+    telegramChatId: v.optional(v.string()),
+    requireApprovalForTransfers: v.optional(v.boolean()),
+    requireApprovalForPurchases: v.optional(v.boolean()),
     createdAt: v.string(),
   }).index("by_companyCode", ["companyCode"]),
 
@@ -103,4 +107,42 @@ export default defineSchema({
     target: v.optional(v.string()),
     timestamp: v.string(),
   }).index("by_clientId", ["clientId"]),
+
+  // Stock Transfer & Direct Purchase Approval Requests
+  approvalRequests: defineTable({
+    clientId: v.id("clients"),
+    type: v.union(v.literal("transfer"), v.literal("direct_purchase")),
+    status: v.union(v.literal("pending"), v.literal("approved"), v.literal("rejected")),
+    sourceLocationType: v.optional(v.string()), // "warehouse" | "store"
+    sourceLocationId: v.optional(v.string()),
+    sourceLocationName: v.optional(v.string()),
+    destinationLocationType: v.optional(v.string()), // "store" | "warehouse"
+    destinationLocationId: v.optional(v.string()),
+    destinationLocationName: v.optional(v.string()),
+    items: v.array(
+      v.object({
+        productId: v.string(),
+        productName: v.string(),
+        productCode: v.optional(v.string()),
+        quantity: v.number(),
+        costPerUnit: v.optional(v.number()),
+      })
+    ),
+    paymentMethod: v.optional(v.string()),
+    bankProvider: v.optional(v.string()),
+    supplierName: v.optional(v.string()),
+    totalCost: v.optional(v.number()),
+    notes: v.optional(v.string()),
+    requestedByUserId: v.string(),
+    requestedByUserName: v.string(),
+    requestedByUserEmail: v.optional(v.string()),
+    reviewedByUserId: v.optional(v.string()),
+    reviewedByUserName: v.optional(v.string()),
+    reviewedAt: v.optional(v.string()),
+    telegramMessageId: v.optional(v.number()),
+    telegramChatId: v.optional(v.string()),
+    createdAt: v.string(),
+  })
+    .index("by_clientId", ["clientId"])
+    .index("by_clientId_status", ["clientId", "status"]),
 });
