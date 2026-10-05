@@ -63,7 +63,7 @@ export const recordSale = mutation({
     const saleId = await ctx.db.insert("sales", {
       clientId: args.clientId,
       storeId: args.storeId,
-      storeName: args.storeName || store.name,
+      storeName: args.storeName || (location as any)?.name || "Store",
       receiptNumber: invoiceNumber,
       items: args.items.map((it) => ({
         productId: it.productId,

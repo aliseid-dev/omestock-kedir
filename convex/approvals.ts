@@ -19,6 +19,9 @@ export const createApprovalRequest = mutation({
         productCode: v.optional(v.string()),
         quantity: v.number(),
         costPerUnit: v.optional(v.number()),
+        unit: v.optional(v.string()),
+        sellingPrice: v.optional(v.number()),
+        minStockThreshold: v.optional(v.number()),
       })
     ),
     paymentMethod: v.optional(v.string()),
@@ -124,6 +127,17 @@ export const approveRequest = mutation({
     requestId: v.id("approvalRequests"),
     reviewerUserId: v.string(),
     reviewerUserName: v.string(),
+    productConfigs: v.optional(
+      v.array(
+        v.object({
+          productId: v.string(),
+          sellingPrice: v.optional(v.number()),
+          minStockThreshold: v.optional(v.number()),
+          costPrice: v.optional(v.number()),
+          unit: v.optional(v.string()),
+        })
+      )
+    ),
   },
   handler: async (ctx, args) => {
     const request = await ctx.db.get(args.requestId);
@@ -303,14 +317,69 @@ export const approveRequest = mutation({
       for (const item of request.items) {
         if (item.quantity <= 0) continue;
         let prodKey = item.productId;
-        if (currentStock[prodKey] === undefined && item.productName) {
+        let matchedProd = clientProducts.find((p) => p._id === prodKey);
+
+        if (!matchedProd && item.productName) {
           const cleanItemName = item.productName.toLowerCase().replace(/[^a-z0-9]/g, "");
-          const match = clientProducts.find((p) => {
+          matchedProd = clientProducts.find((p) => {
             const cleanProdName = p.name.toLowerCase().replace(/[^a-z0-9]/g, "");
-            return cleanProdName.includes(cleanItemName) || cleanItemName.includes(cleanProdName);
+            return cleanProdName === cleanItemName || cleanProdName.includes(cleanItemName) || cleanItemName.includes(cleanProdName);
           });
-          if (match) prodKey = match._id;
+          if (matchedProd) prodKey = matchedProd._id;
         }
+
+        // Check if the owner passed custom configs for this product
+        const config = args.productConfigs?.find(
+          (c) => c.productId === item.productId || c.productId === prodKey
+        );
+
+        const costPrice =
+          (config?.costPrice !== undefined && config.costPrice > 0)
+            ? config.costPrice
+            : (item.costPerUnit || matchedProd?.costPrice || 0);
+
+        const sellingPrice =
+          (config?.sellingPrice !== undefined && config.sellingPrice > 0)
+            ? config.sellingPrice
+            : (item.sellingPrice || matchedProd?.sellingPrice || (costPrice > 0 ? Math.round(costPrice * 1.25) : 30));
+
+        const minStockThreshold =
+          (config?.minStockThreshold !== undefined && config.minStockThreshold > 0)
+            ? config.minStockThreshold
+            : (item.minStockThreshold || matchedProd?.minStockThreshold || 5);
+
+        const unit = config?.unit || item.unit || matchedProd?.unit || "Piece";
+
+        const nameToCheck = (matchedProd?.name || item.productName || "");
+        const categoryToCheck = (matchedProd?.category || "");
+        const isOil = (nameToCheck + " " + categoryToCheck).toLowerCase().includes("oil");
+        const defaultCommission = isOil ? 0.5 : 2.5;
+
+        if (matchedProd) {
+          await ctx.db.patch(matchedProd._id, {
+            sellingPrice,
+            minStockThreshold,
+            costPrice: costPrice > 0 ? costPrice : matchedProd.costPrice,
+            unit,
+            defaultCommissionRate: matchedProd.defaultCommissionRate !== undefined ? matchedProd.defaultCommissionRate : defaultCommission,
+          });
+          prodKey = matchedProd._id;
+        } else if (request.clientId && item.productName) {
+          const newProdId = await ctx.db.insert("products", {
+            clientId: request.clientId,
+            name: item.productName.trim(),
+            code: item.productCode?.trim() || undefined,
+            category: "General",
+            unit,
+            sellingPrice,
+            costPrice,
+            defaultCommissionRate: defaultCommission,
+            minStockThreshold,
+            createdAt: now,
+          });
+          prodKey = newProdId;
+        }
+
         currentStock[prodKey] = (currentStock[prodKey] || 0) + item.quantity;
       }
 

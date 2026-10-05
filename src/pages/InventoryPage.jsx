@@ -11,7 +11,6 @@ import {
   Minus,
   ArrowDown,
   ChevronDown,
-  DollarSign,
   Building,
   CreditCard,
   Check,
@@ -39,7 +38,11 @@ import {
   Send,
   Clock,
   CheckCircle,
-  XCircle
+  XCircle,
+  FileSpreadsheet,
+  UploadCloud,
+  Zap,
+  RefreshCw
 } from 'lucide-react'
 import { useTenant } from '../context/TenantContext'
 import { useAuth } from '../context/AuthContext'
@@ -50,6 +53,22 @@ import { Badge } from '../components/ui/Badge'
 import { Modal } from '../components/ui/Modal'
 import { formatCurrency } from '../lib/utils'
 import { ETHIOPIAN_PAYMENT_PROVIDERS, DEFAULT_BANK } from '../lib/ethiopian-banks'
+import { parseInventoryExcel, PRELOADED_KAYA_YASMIN_ITEMS } from '../lib/excel-importer'
+
+export const INVENTORY_UNITS = [
+  'Piece',
+  'Kg',
+  'Litre',
+  'Box',
+  'Carton',
+  'Set',
+  'Pack',
+  'Meter',
+  'Pair',
+  'Roll',
+  'Can',
+  'Drum',
+]
 
 function SearchableProductSelect({
   value,
@@ -117,7 +136,6 @@ function SearchableProductSelect({
                 {selectedProduct.name}
               </span>
               <span className="text-[10px] text-slate-400 font-medium">
-                {selectedProduct.code ? `SKU: ${selectedProduct.code} • ` : ''}
                 {showCost && selectedProduct.costPrice ? `Cost: ${formatCurrency(selectedProduct.costPrice)} • ` : ''}
                 {selectedProduct.category || 'General'}
               </span>
@@ -150,7 +168,7 @@ function SearchableProductSelect({
                 autoFocus
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Type to search product name or SKU..."
+                placeholder="Type to search product name..."
                 className="w-full pl-8 pr-7 py-2 bg-white border border-slate-200 rounded-lg text-xs font-medium focus:outline-none focus:ring-2 focus:ring-slate-900/10"
               />
               {search && (
@@ -190,8 +208,7 @@ function SearchableProductSelect({
                     <div className="min-w-0 flex-1">
                       <div className="text-xs font-bold text-slate-900 truncate">{p.name}</div>
                       <div className="text-[10px] text-slate-400 flex items-center gap-1.5">
-                        {p.code && <span className="font-mono bg-slate-100 px-1 py-0.2 rounded font-bold text-slate-600">{p.code}</span>}
-                        {showCost && p.costPrice && <span>Cost: {formatCurrency(p.costPrice)}</span>}
+                        {showCost && p.costPrice && <span>Cost: {formatCurrency(p.costPrice)} &bull; </span>}
                         <span>{p.category || 'General'}</span>
                       </div>
                     </div>
@@ -227,6 +244,8 @@ export function InventoryPage() {
     overrideStock,
     updateProduct,
     seedSampleInventory,
+    bulkImportInventory,
+    clearDatabaseData,
     addStore,
     deleteStore,
     pendingApprovals,
@@ -246,6 +265,47 @@ export function InventoryPage() {
   const [requireTelegramApproval, setRequireTelegramApproval] = useState(true)
   const [isSubmittingStorePurchase, setIsSubmittingStorePurchase] = useState(false)
   const [isSubmittingWarehousePurchase, setIsSubmittingWarehousePurchase] = useState(false)
+  const [approvalConfigs, setApprovalConfigs] = useState({})
+
+  // Excel Import & Clear Database States
+  const [isImportExcelModalOpen, setIsImportExcelModalOpen] = useState(false)
+  const [isClearDbModalOpen, setIsClearDbModalOpen] = useState(false)
+  const [isImportingExcel, setIsImportingExcel] = useState(false)
+  const [isClearingDatabase, setIsClearingDatabase] = useState(false)
+  const [excelParsedData, setExcelParsedData] = useState(null)
+  const [excelImportClearExisting, setExcelImportClearExisting] = useState(true)
+  const [clearDbConfirmationText, setClearDbConfirmationText] = useState('')
+  const fileInputRef = useRef(null)
+
+  const getApprovalItemConfig = (reqId, it, idx) => {
+    const itemKey = `${reqId}_${it.productId || idx}`
+    if (approvalConfigs[itemKey]) {
+      return approvalConfigs[itemKey]
+    }
+    const matchedProd = products?.find(
+      (p) => p.id === it.productId || (it.productName && p.name?.toLowerCase().trim() === it.productName?.toLowerCase().trim())
+    )
+    const cost = it.costPerUnit || matchedProd?.costPrice || 0
+    const defaultSellingPrice = it.sellingPrice || matchedProd?.sellingPrice || (cost > 0 ? Math.round(cost * 1.25) : 30)
+    const defaultMinStock = it.minStockThreshold || matchedProd?.minStockThreshold || 5
+    return {
+      sellingPrice: defaultSellingPrice,
+      minStockThreshold: defaultMinStock,
+      unit: it.unit || matchedProd?.unit || 'Piece',
+    }
+  }
+
+  const handleUpdateApprovalItemConfig = (reqId, it, idx, field, value) => {
+    const itemKey = `${reqId}_${it.productId || idx}`
+    const current = getApprovalItemConfig(reqId, it, idx)
+    setApprovalConfigs((prev) => ({
+      ...prev,
+      [itemKey]: {
+        ...current,
+        [field]: value
+      }
+    }))
+  }
 
   const handleSeedSampleData = async () => {
     if (!confirm('Load 15 sample items from Kaya Yasmin Auto Parts into warehouse and store?')) return
@@ -262,6 +322,90 @@ export function InventoryPage() {
       toast.error('Seeding Error', 'Failed to load sample inventory.')
     } finally {
       setIsSeeding(false)
+    }
+  }
+
+  // Handle Excel File Upload & Parse
+  const handleExcelFileChange = async (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setIsImportingExcel(true)
+    try {
+      const parsed = await parseInventoryExcel(file)
+      setExcelParsedData(parsed)
+      toast.success(
+        'Spreadsheet Parsed',
+        `Found ${parsed.summary.totalProducts} products (${parsed.summary.warehouseUnits} in warehouse, ${parsed.summary.storeUnits} in store).`
+      )
+    } catch (err) {
+      console.error('Failed to parse Excel file:', err)
+      toast.error('Parse Error', err.message || 'Could not parse the selected Excel file.')
+      setExcelParsedData(null)
+    } finally {
+      setIsImportingExcel(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
+  // Handle Load Preloaded Kaya Yasmin Auto Parts Excel
+  const handleLoadPreloadedExcel = () => {
+    const totalWhUnits = PRELOADED_KAYA_YASMIN_ITEMS.reduce((s, it) => s + (it.warehouseStock || 0), 0)
+    const totalStUnits = PRELOADED_KAYA_YASMIN_ITEMS.reduce((s, it) => s + (it.storeStock || 0), 0)
+    const whCount = PRELOADED_KAYA_YASMIN_ITEMS.filter((it) => it.warehouseStock !== undefined).length
+    const stCount = PRELOADED_KAYA_YASMIN_ITEMS.filter((it) => it.storeStock !== undefined).length
+    setExcelParsedData({
+      fileName: 'Kaya Yasmin Auto Parts Inventory.xlsx',
+      sheetsDetected: ['Inventory store (Warehouse)', 'Inventory shop (Retail Store)'],
+      items: PRELOADED_KAYA_YASMIN_ITEMS,
+      summary: {
+        totalProducts: PRELOADED_KAYA_YASMIN_ITEMS.length,
+        warehouseProductsCount: whCount,
+        storeProductsCount: stCount,
+        warehouseUnits: totalWhUnits,
+        storeUnits: totalStUnits,
+        oilProductsCount: PRELOADED_KAYA_YASMIN_ITEMS.filter((it) => it.defaultCommissionRate === 0.5).length,
+      }
+    })
+    toast.info('Workbook Ready', `Loaded ${PRELOADED_KAYA_YASMIN_ITEMS.length} items (${whCount} Warehouse, ${stCount} Store). Ready to import!`)
+  }
+
+  // Confirm and Execute Bulk Import
+  const handleConfirmBulkImport = async () => {
+    if (!excelParsedData || !excelParsedData.items || excelParsedData.items.length === 0) {
+      toast.warning('No Items', 'Please select or load an Excel workbook first.')
+      return
+    }
+
+    setIsImportingExcel(true)
+    try {
+      const res = await bulkImportInventory(excelParsedData.items, excelImportClearExisting)
+      toast.success(
+        'Inventory Populated!',
+        `Successfully imported ${res.importedCount} products (${res.warehouseUnits} Warehouse units, ${res.storeUnits} Store units).`
+      )
+      setIsImportExcelModalOpen(false)
+      setExcelParsedData(null)
+    } catch (err) {
+      console.error('Bulk import failed:', err)
+      toast.error('Import Failed', err.message || 'Could not complete inventory import.')
+    } finally {
+      setIsImportingExcel(false)
+    }
+  }
+
+  // Handle Clear Database
+  const handleConfirmClearDatabase = async () => {
+    setIsClearingDatabase(true)
+    try {
+      await clearDatabaseData()
+      toast.success('Database Cleared', 'All inventory products, warehouse stock, store stock, approvals, and sales records have been cleared.')
+      setIsClearDbModalOpen(false)
+      setClearDbConfirmationText('')
+    } catch (err) {
+      console.error('Clear database failed:', err)
+      toast.error('Clear Failed', err.message || 'Could not clear database.')
+    } finally {
+      setIsClearingDatabase(false)
     }
   }
 
@@ -282,21 +426,47 @@ export function InventoryPage() {
 
   const availableCategories = useMemo(() => {
     const cats = new Set()
-    products.forEach(p => {
-      if (p.category) cats.add(p.category)
-    })
+    if (!activeLocation) {
+      products.forEach(p => {
+        if (p.category) cats.add(p.category)
+      })
+    } else {
+      const stockMap = activeLocation.stock || {}
+      products.forEach(p => {
+        const isStocked = Object.prototype.hasOwnProperty.call(stockMap, p.id) && stockMap[p.id] !== undefined
+        if (isStocked) {
+          // If in warehouse and 0 stock, only count if it's genuinely a warehouse product
+          if (activeLocationType === 'warehouse' && (stockMap[p.id] || 0) <= 0) {
+            const isGas = p.name.toLowerCase().includes('gas') || (p.category && p.category.toLowerCase().includes('gas'))
+            if (!isGas) return
+          }
+          if (p.category) cats.add(p.category)
+        }
+      })
+    }
     return ['ALL', ...Array.from(cats)]
-  }, [products])
+  }, [products, activeLocation, activeLocationType])
 
   const locationFilteredProducts = useMemo(() => {
     if (!activeLocation) return []
+    const stockMap = activeLocation.stock || {}
     return products.filter(p => {
+      // Must be stocked / allocated in this location
+      const isStocked = Object.prototype.hasOwnProperty.call(stockMap, p.id) && stockMap[p.id] !== undefined
+      if (!isStocked) return false
+
+      // Guard against ghost 0-stock entries in warehouse: if in warehouse with 0 stock, only show genuine warehouse products
+      if (activeLocationType === 'warehouse' && (stockMap[p.id] || 0) <= 0) {
+        const isGas = p.name.toLowerCase().includes('gas') || (p.category && p.category.toLowerCase().includes('gas'))
+        if (!isGas) return false
+      }
+
       const q = globalSearchQuery.toLowerCase().trim()
       const matchesSearch = !q || p.name.toLowerCase().includes(q) || (p.category && p.category.toLowerCase().includes(q))
       const matchesCategory = selectedCategory === 'ALL' || p.category === selectedCategory
       return matchesSearch && matchesCategory
     })
-  }, [products, activeLocation, globalSearchQuery, selectedCategory])
+  }, [products, activeLocation, activeLocationType, globalSearchQuery, selectedCategory])
 
   // Modals
   const [isTransferModalOpen, setIsTransferModalOpen] = useState(false)
@@ -310,6 +480,7 @@ export function InventoryPage() {
   const [warehouseAddProductForm, setWarehouseAddProductForm] = useState({
     name: '',
     category: 'General',
+    unit: 'Piece',
     sellingPrice: '30',
     costPrice: '20',
     initialQuantity: '10',
@@ -322,6 +493,7 @@ export function InventoryPage() {
     productId: '',
     quantity: '10',
     costPerUnit: '20',
+    unit: 'Piece',
     paymentMethod: 'Banking', // 'Banking' | 'Telebirr' | 'Cash'
     bankProvider: 'cbe',
     bankReference: '',
@@ -345,6 +517,7 @@ export function InventoryPage() {
   const [storeAddProductForm, setStoreAddProductForm] = useState({
     name: '',
     category: 'General',
+    unit: 'Piece',
     sellingPrice: '30',
     costPrice: '20',
     initialQuantity: '10',
@@ -357,6 +530,7 @@ export function InventoryPage() {
     productId: '',
     quantity: '10',
     costPerUnit: '20',
+    unit: 'Piece',
     paymentMethod: 'Banking', // 'Banking' | 'Telebirr' | 'Cash'
     bankProvider: 'cbe',
     bankReference: '',
@@ -389,6 +563,7 @@ export function InventoryPage() {
       productId: products[0]?.id || '',
       quantity: '10',
       costPerUnit: products[0]?.costPrice || '20',
+      unit: products[0]?.unit || 'Piece',
       newProductName: '',
       newProductCategory: 'General',
       newProductSellingPrice: '30',
@@ -406,6 +581,7 @@ export function InventoryPage() {
         productId: nextProd?.id || '',
         quantity: '10',
         costPerUnit: isNew ? '20' : (nextProd?.costPrice || '20'),
+        unit: isNew ? 'Piece' : (nextProd?.unit || 'Piece'),
         newProductName: '',
         newProductCategory: 'General',
         newProductSellingPrice: '30',
@@ -424,7 +600,10 @@ export function InventoryPage() {
       const updated = { ...r, [field]: val }
       if (field === 'productId') {
         const prod = products.find(p => p.id === val)
-        if (prod) updated.costPerUnit = prod.costPrice || '0'
+        if (prod) {
+          updated.costPerUnit = prod.costPrice || '0'
+          updated.unit = prod.unit || 'Piece'
+        }
       }
       return updated
     }))
@@ -435,9 +614,10 @@ export function InventoryPage() {
   const [standaloneProductForm, setStandaloneProductForm] = useState({
     name: '',
     category: 'General',
+    unit: 'Piece',
     sellingPrice: '30',
     costPrice: '20',
-    defaultCommissionRate: '5',
+    defaultCommissionRate: '2.5',
     minStockThreshold: '10',
     initialDestination: 'none', // 'none' | 'warehouse' | 'store'
     initialDestinationId: '',
@@ -457,6 +637,7 @@ export function InventoryPage() {
     productId: products[0]?.id || '',
     quantity: '10',
     costPerUnit: products[0]?.costPrice || '20',
+    unit: products[0]?.unit || 'Piece',
     paymentMethod: 'Cash', // Cash | Banking | Credit
     bankProvider: DEFAULT_BANK,
     supplierName: '',
@@ -465,7 +646,7 @@ export function InventoryPage() {
     newProductCategory: 'General',
     newProductSellingPrice: '30',
     newProductCostPrice: '20',
-    newProductCommissionRate: '5',
+    newProductCommissionRate: '2.5',
     newProductMinThreshold: '10',
   })
 
@@ -649,11 +830,14 @@ export function InventoryPage() {
       return
     }
 
+    const isOil = (warehouseAddProductForm.name + ' ' + (warehouseAddProductForm.category || '')).toLowerCase().includes('oil')
     const created = await createProduct({
       name: warehouseAddProductForm.name.trim(),
       category: warehouseAddProductForm.category?.trim() || 'General',
+      unit: warehouseAddProductForm.unit || 'Piece',
       sellingPrice: warehouseAddProductForm.sellingPrice,
       costPrice: warehouseAddProductForm.costPrice,
+      defaultCommissionRate: isOil ? 0.5 : 2.5,
       minStockThreshold: warehouseAddProductForm.minStockThreshold,
       initialWarehouseId: activeLocation.id,
       initialQuantity: parseInt(warehouseAddProductForm.initialQuantity, 10) || 0,
@@ -665,6 +849,7 @@ export function InventoryPage() {
       setWarehouseAddProductForm({
         name: '',
         category: 'General',
+        unit: 'Piece',
         sellingPrice: '30',
         costPrice: '20',
         initialQuantity: '10',
@@ -685,6 +870,7 @@ export function InventoryPage() {
       productId,
       quantity,
       costPerUnit,
+      unit,
       paymentMethod,
       bankProvider,
       bankReference,
@@ -707,6 +893,7 @@ export function InventoryPage() {
     try {
       let targetProductId = productId
       let targetProductName = ''
+      let targetProductUnit = unit || 'Piece'
 
       if (isWarehousePurchaseNewProduct) {
         if (!newProductName || !newProductName.trim()) {
@@ -718,13 +905,16 @@ export function InventoryPage() {
         if (existing) {
           targetProductId = existing.id
           targetProductName = existing.name
+          targetProductUnit = existing.unit || unit || 'Piece'
         } else {
+          const isOil = (trimmedName + ' ' + (newProductCategory || '')).toLowerCase().includes('oil')
           const created = await createProduct({
             name: trimmedName,
             category: newProductCategory?.trim() || 'General',
+            unit: unit || 'Piece',
             sellingPrice: newProductSellingPrice || '30',
             costPrice: costPerUnit || '20',
-            defaultCommissionRate: 5,
+            defaultCommissionRate: isOil ? 0.5 : 2.5,
             minStockThreshold: 5,
           }, currentUser)
           if (!created) {
@@ -733,6 +923,7 @@ export function InventoryPage() {
           }
           targetProductId = created.id
           targetProductName = created.name
+          targetProductUnit = created.unit || 'Piece'
         }
       } else {
         if (!productId) {
@@ -741,6 +932,7 @@ export function InventoryPage() {
         }
         const prod = products.find(p => p.id === productId)
         targetProductName = prod?.name || 'Product'
+        targetProductUnit = prod?.unit || unit || 'Piece'
       }
 
       let bankProviderName = undefined
@@ -769,6 +961,9 @@ export function InventoryPage() {
             productName: targetProductName,
             quantity: qty,
             costPerUnit: cost,
+            unit: targetProductUnit,
+            sellingPrice: parseFloat(newProductSellingPrice) || undefined,
+            minStockThreshold: 5,
           }],
           paymentMethod,
           bankProvider: bankProviderName,
@@ -778,7 +973,7 @@ export function InventoryPage() {
         setIsWarehousePurchaseNewProduct(false)
         toast.info(
           'Approval Request Sent',
-          `Direct purchase request for ${qty} unit${qty > 1 ? 's' : ''} of "${targetProductName}" sent to Owner on Telegram for review.`
+          `Direct purchase request for ${qty} ${targetProductUnit} of "${targetProductName}" sent to Owner on Telegram for review.`
         )
         setWarehouseDirectPurchaseForm(prev => ({
           ...prev,
@@ -799,6 +994,7 @@ export function InventoryPage() {
           productName: targetProductName,
           quantity: qty,
           costPerUnit: cost,
+          unit: targetProductUnit,
         }],
         paymentMethod,
         bankProvider: bankProviderName,
@@ -922,11 +1118,14 @@ export function InventoryPage() {
       return
     }
 
+    const isOil = (storeAddProductForm.name + ' ' + (storeAddProductForm.category || '')).toLowerCase().includes('oil')
     const created = await createProduct({
       name: storeAddProductForm.name.trim(),
       category: storeAddProductForm.category?.trim() || 'General',
+      unit: storeAddProductForm.unit || 'Piece',
       sellingPrice: storeAddProductForm.sellingPrice,
       costPrice: storeAddProductForm.costPrice,
+      defaultCommissionRate: isOil ? 0.5 : 2.5,
       minStockThreshold: storeAddProductForm.minStockThreshold,
       initialStoreId: activeLocation.id,
       initialQuantity: parseInt(storeAddProductForm.initialQuantity, 10) || 0,
@@ -938,6 +1137,7 @@ export function InventoryPage() {
       setStoreAddProductForm({
         name: '',
         category: 'General',
+        unit: 'Piece',
         sellingPrice: '30',
         costPrice: '20',
         initialQuantity: '10',
@@ -957,6 +1157,7 @@ export function InventoryPage() {
       productId,
       quantity,
       costPerUnit,
+      unit,
       paymentMethod,
       bankProvider,
       bankReference,
@@ -979,6 +1180,7 @@ export function InventoryPage() {
     try {
       let targetProductId = productId
       let targetProductName = ''
+      let targetProductUnit = unit || 'Piece'
 
       if (isStorePurchaseNewProduct) {
         if (!newProductName || !newProductName.trim()) {
@@ -990,13 +1192,16 @@ export function InventoryPage() {
         if (existing) {
           targetProductId = existing.id
           targetProductName = existing.name
+          targetProductUnit = existing.unit || unit || 'Piece'
         } else {
+          const isOil = (trimmedName + ' ' + (newProductCategory || '')).toLowerCase().includes('oil')
           const created = await createProduct({
             name: trimmedName,
             category: newProductCategory?.trim() || 'General',
+            unit: unit || 'Piece',
             sellingPrice: newProductSellingPrice || '30',
             costPrice: costPerUnit || '20',
-            defaultCommissionRate: 5,
+            defaultCommissionRate: isOil ? 0.5 : 2.5,
             minStockThreshold: 5,
           }, currentUser)
           if (!created) {
@@ -1005,6 +1210,7 @@ export function InventoryPage() {
           }
           targetProductId = created.id
           targetProductName = created.name
+          targetProductUnit = created.unit || 'Piece'
         }
       } else {
         if (!productId) {
@@ -1013,6 +1219,7 @@ export function InventoryPage() {
         }
         const prod = products.find(p => p.id === productId)
         targetProductName = prod?.name || 'Product'
+        targetProductUnit = prod?.unit || unit || 'Piece'
       }
 
       let bankProviderName = undefined
@@ -1041,6 +1248,9 @@ export function InventoryPage() {
             productName: targetProductName,
             quantity: qty,
             costPerUnit: cost,
+            unit: targetProductUnit,
+            sellingPrice: parseFloat(newProductSellingPrice) || undefined,
+            minStockThreshold: 5,
           }],
           paymentMethod,
           bankProvider: bankProviderName,
@@ -1050,7 +1260,7 @@ export function InventoryPage() {
         setIsStorePurchaseNewProduct(false)
         toast.info(
           'Approval Request Sent',
-          `Direct purchase request for ${qty} unit${qty > 1 ? 's' : ''} of "${targetProductName}" sent to Owner on Telegram for review.`
+          `Direct purchase request for ${qty} ${targetProductUnit} of "${targetProductName}" sent to Owner on Telegram for review.`
         )
         setStoreDirectPurchaseForm(prev => ({
           ...prev,
@@ -1071,6 +1281,7 @@ export function InventoryPage() {
           productName: targetProductName,
           quantity: qty,
           costPerUnit: cost,
+          unit: targetProductUnit,
         }],
         paymentMethod,
         bankProvider: bankProviderName,
@@ -1203,12 +1414,14 @@ export function InventoryPage() {
             toast.warning('Product Name Required', 'Please specify a product name for all new items in the purchase manifest.')
             return
           }
+          const isOil = ((it.newProductName || '') + ' ' + (it.newProductCategory || '')).toLowerCase().includes('oil')
           const created = await createProduct({
             name: it.newProductName.trim(),
             category: it.newProductCategory?.trim() || 'General',
+            unit: it.unit || 'Piece',
             sellingPrice: it.newProductSellingPrice || '30',
             costPrice: it.costPerUnit || '20',
-            defaultCommissionRate: 5,
+            defaultCommissionRate: isOil ? 0.5 : 2.5,
             minStockThreshold: 10,
           }, currentUser)
           if (!created) {
@@ -1220,6 +1433,9 @@ export function InventoryPage() {
             productName: created.name,
             quantity: qty,
             costPerUnit: parseFloat(it.costPerUnit) || 0,
+            unit: it.unit || created.unit || 'Piece',
+            sellingPrice: parseFloat(it.newProductSellingPrice) || undefined,
+            minStockThreshold: 10,
           })
         } else if (it.productId) {
           const prod = products.find(p => p.id === it.productId)
@@ -1228,6 +1444,9 @@ export function InventoryPage() {
             productName: prod?.name || it.productId,
             quantity: qty,
             costPerUnit: parseFloat(it.costPerUnit) || 0,
+            unit: it.unit || prod?.unit || 'Piece',
+            sellingPrice: prod?.sellingPrice,
+            minStockThreshold: prod?.minStockThreshold,
           })
         }
       }
@@ -1260,6 +1479,7 @@ export function InventoryPage() {
             productId: products[0]?.id || '',
             quantity: '10',
             costPerUnit: products[0]?.costPrice || '20',
+            unit: products[0]?.unit || 'Piece',
             newProductName: '',
             newProductCategory: 'General',
             newProductSellingPrice: '30'
@@ -1289,6 +1509,7 @@ export function InventoryPage() {
           productId: products[0]?.id || '',
           quantity: '10',
           costPerUnit: products[0]?.costPrice || '20',
+          unit: products[0]?.unit || 'Piece',
           newProductName: '',
           newProductCategory: 'General',
           newProductSellingPrice: '30'
@@ -1300,19 +1521,22 @@ export function InventoryPage() {
     // Single item mode
     let targetProductId = purchaseForm.productId
     let targetProductName = ''
+    let targetProductUnit = purchaseForm.unit || 'Piece'
 
     if (isPurchaseCreatingNewProduct) {
       if (!purchaseForm.newProductName.trim()) {
         toast.warning('Product Name Required', 'Please enter a product name.')
         return
       }
+      const isOil = ((purchaseForm.newProductName || '') + ' ' + (purchaseForm.newProductCategory || '')).toLowerCase().includes('oil')
       const created = await createProduct({
         name: purchaseForm.newProductName.trim(),
         category: purchaseForm.newProductCategory.trim() || 'General',
+        unit: purchaseForm.unit || 'Piece',
         sellingPrice: purchaseForm.newProductSellingPrice,
         costPrice: purchaseForm.newProductCostPrice,
-        defaultCommissionRate: purchaseForm.newProductCommissionRate,
-        minStockThreshold: purchaseForm.newProductMinThreshold,
+        defaultCommissionRate: isOil ? 0.5 : 2.5,
+        minStockThreshold: purchaseForm.newProductMinThreshold || 5,
       }, currentUser)
       if (!created) {
         toast.error('Creation Failed', 'Failed to create product. Please try again.')
@@ -1320,9 +1544,11 @@ export function InventoryPage() {
       }
       targetProductId = created.id
       targetProductName = created.name
+      targetProductUnit = created.unit || purchaseForm.unit || 'Piece'
     } else {
       const prod = products.find(p => p.id === targetProductId)
       targetProductName = prod?.name || 'Product'
+      targetProductUnit = prod?.unit || purchaseForm.unit || 'Piece'
     }
 
     const singleCost = parseFloat(isPurchaseCreatingNewProduct ? purchaseForm.newProductCostPrice : purchaseForm.costPerUnit) || 0
@@ -1339,6 +1565,9 @@ export function InventoryPage() {
           productName: targetProductName,
           quantity: singleQty,
           costPerUnit: singleCost,
+          unit: targetProductUnit,
+          sellingPrice: parseFloat(purchaseForm.newProductSellingPrice) || undefined,
+          minStockThreshold: parseInt(purchaseForm.newProductMinThreshold, 10) || undefined,
         }],
         paymentMethod: purchaseForm.paymentMethod,
         bankProvider: bankProviderName,
@@ -1349,7 +1578,7 @@ export function InventoryPage() {
       setIsPurchaseCreatingNewProduct(false)
       toast.info(
         'Approval Request Sent',
-        `Direct purchase request for ${singleQty} units of "${targetProductName}" sent to Owner on Telegram for review.`
+        `Direct purchase request for ${singleQty} ${targetProductUnit} of "${targetProductName}" sent to Owner on Telegram for review.`
       )
       setPurchaseForm(prev => ({
         ...prev,
@@ -1362,9 +1591,13 @@ export function InventoryPage() {
 
     await recordDirectPurchase({
       storeId: purchaseForm.storeId,
-      productId: targetProductId,
-      quantity: purchaseForm.quantity,
-      costPerUnit: isPurchaseCreatingNewProduct ? purchaseForm.newProductCostPrice : purchaseForm.costPerUnit,
+      items: [{
+        productId: targetProductId,
+        productName: targetProductName,
+        quantity: singleQty,
+        costPerUnit: singleCost,
+        unit: targetProductUnit,
+      }],
       paymentMethod: purchaseForm.paymentMethod,
       bankProvider: bankProviderName,
       supplierName: purchaseForm.supplierName,
@@ -1376,7 +1609,7 @@ export function InventoryPage() {
     const prObj = products.find(p => p.id === targetProductId)
     toast.success(
       'Direct Purchase Recorded',
-      `Purchased ${purchaseForm.quantity} units of "${prObj?.name || 'Product'}" for ${stObj?.name || 'store'}.`
+      `Purchased ${purchaseForm.quantity} ${targetProductUnit} of "${prObj?.name || 'Product'}" for ${stObj?.name || 'store'}.`
     )
     setPurchaseForm(prev => ({
       ...prev,
@@ -1393,12 +1626,18 @@ export function InventoryPage() {
       toast.warning('Product Name Required', 'Please enter a product name.')
       return
     }
+    const isOil = ((standaloneProductForm.name || '') + ' ' + (standaloneProductForm.category || '')).toLowerCase().includes('oil')
+    const commissionRate = standaloneProductForm.defaultCommissionRate !== undefined && standaloneProductForm.defaultCommissionRate !== ''
+      ? parseFloat(standaloneProductForm.defaultCommissionRate)
+      : (isOil ? 0.5 : 2.5)
+
     const created = await createProduct({
       name: standaloneProductForm.name.trim(),
       category: standaloneProductForm.category.trim() || 'General',
+      unit: standaloneProductForm.unit || 'Piece',
       sellingPrice: standaloneProductForm.sellingPrice,
       costPrice: standaloneProductForm.costPrice,
-      defaultCommissionRate: standaloneProductForm.defaultCommissionRate,
+      defaultCommissionRate: commissionRate,
       minStockThreshold: standaloneProductForm.minStockThreshold,
     }, currentUser)
 
@@ -1423,6 +1662,9 @@ export function InventoryPage() {
                 productName: created.name,
                 quantity: initQty,
                 costPerUnit: parseFloat(standaloneProductForm.costPrice) || 0,
+                unit: standaloneProductForm.unit || created.unit || 'Piece',
+                sellingPrice: parseFloat(standaloneProductForm.sellingPrice) || undefined,
+                minStockThreshold: parseInt(standaloneProductForm.minStockThreshold, 10) || undefined,
               }],
               paymentMethod: 'Cash',
               supplierName: 'Initial Product Stocking',
@@ -1456,6 +1698,9 @@ export function InventoryPage() {
                 productName: created.name,
                 quantity: initQty,
                 costPerUnit: parseFloat(standaloneProductForm.costPrice) || 0,
+                unit: standaloneProductForm.unit || created.unit || 'Piece',
+                sellingPrice: parseFloat(standaloneProductForm.sellingPrice) || undefined,
+                minStockThreshold: parseInt(standaloneProductForm.minStockThreshold, 10) || undefined,
               }],
               paymentMethod: 'Cash',
               supplierName: 'Initial Product Stocking',
@@ -1603,7 +1848,7 @@ export function InventoryPage() {
               </h1>
             </div>
 
-            {/* Quick Actions: Mobile-First 2-button layout (Transfer Stock & Add Store only) */}
+            {/* Quick Actions: Mobile-First layout (Transfer Stock, Add Store, Import Excel, Clear Database) */}
             <div className={`w-full sm:w-auto gap-2.5 sm:gap-3 ${isOwner ? 'grid grid-cols-2 sm:flex sm:items-center' : 'flex items-center'}`}>
               <Button
                 variant="secondary"
@@ -1624,15 +1869,21 @@ export function InventoryPage() {
               </Button>
 
               {isOwner && (
-                <Button
-                  variant="outline"
-                  size="md"
-                  onClick={() => setIsAddStoreModalOpen(true)}
-                  className="w-full sm:w-auto flex items-center justify-center gap-2 text-xs sm:text-sm font-bold border-blue-300 text-blue-900 bg-blue-50/80 hover:bg-blue-100 active:scale-[0.98] transition-all min-h-[46px] rounded-xl shadow-xs touch-manipulation cursor-pointer px-4"
-                >
-                  <PlusCircle className="w-4 h-4 text-blue-700 shrink-0" />
-                  <span className="truncate">+ Add Store</span>
-                </Button>
+                <>
+                  <Button
+                    variant="outline"
+                    size="md"
+                    onClick={() => setIsAddStoreModalOpen(true)}
+                    className="w-full sm:w-auto flex items-center justify-center gap-2 text-xs sm:text-sm font-bold border-blue-300 text-blue-900 bg-blue-50/80 hover:bg-blue-100 active:scale-[0.98] transition-all min-h-[46px] rounded-xl shadow-xs touch-manipulation cursor-pointer px-4"
+                  >
+                    <PlusCircle className="w-4 h-4 text-blue-700 shrink-0" />
+                    <span className="truncate">Add Store</span>
+                  </Button>
+
+                  
+
+                  
+                </>
               )}
             </div>
           </div>
@@ -1765,15 +2016,12 @@ export function InventoryPage() {
                   <ArrowLeft className="w-3.5 h-3.5" />
                   <span>Locations</span>
                 </button>
-                <Badge variant={activeLocationType === 'warehouse' ? 'purple' : 'info'} className="text-[10px] font-bold">
-                  {activeLocationType === 'warehouse' ? '🏭 Warehouse' : '🏪 Retail Store'}
-                </Badge>
               </div>
               <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight leading-tight">
                 {activeLocation.name}
               </h1>
               <p className="text-xs text-slate-500 font-medium mt-0.5">
-                {locationFilteredProducts.length} Items &bull; {products.reduce((acc, p) => acc + (activeLocation.stock?.[p.id] || 0), 0)} Total Units
+                {locationFilteredProducts.length} Items &bull; {locationFilteredProducts.reduce((acc, p) => acc + (activeLocation.stock?.[p.id] || 0), 0).toLocaleString()} Total Units
               </p>
             </div>
 
@@ -1829,25 +2077,7 @@ export function InventoryPage() {
                     <span>Direct Purchase</span>
                   </Button>
 
-                  <Button
-                    size="md"
-                    variant="outline"
-                    onClick={() => {
-                      const otherWh = warehouses.find(w => w.id !== activeLocation.id)
-                      const stockedProd = products.find(p => (activeLocation.stock?.[p.id] || 0) > 0)
-                      setWarehouseTransferForm({
-                        toWarehouseId: otherWh?.id || '',
-                        toStoreId: otherWh ? '' : (stores[0]?.id || ''),
-                        productId: stockedProd?.id || products[0]?.id || '',
-                        quantity: '5',
-                      })
-                      setIsWarehouseTransferOpen(true)
-                    }}
-                    className="w-full sm:w-auto text-xs sm:text-sm font-bold border-slate-300 text-slate-800 bg-white hover:bg-slate-50 flex items-center justify-center gap-1.5 py-2.5 px-2.5 sm:px-4 rounded-xl cursor-pointer"
-                  >
-                    <ArrowRightLeft className="w-4 h-4 text-purple-700 shrink-0" />
-                    <span>Transfer</span>
-                  </Button>
+                  
                 </>
               ) : (
                 <>
@@ -1899,25 +2129,7 @@ export function InventoryPage() {
                     <span>Direct Purchase</span>
                   </Button>
 
-                  <Button
-                    size="md"
-                    variant="outline"
-                    onClick={() => {
-                      const defaultWh = warehouses[0]?.id || ''
-                      const stockedProd = products.find(p => (activeLocation.stock?.[p.id] || 0) > 0)
-                      setStoreTransferForm({
-                        toWarehouseId: defaultWh,
-                        toStoreId: stores.find(s => s.id !== activeLocation.id)?.id || '',
-                        productId: stockedProd?.id || products[0]?.id || '',
-                        quantity: '5',
-                      })
-                      setIsStoreTransferOpen(true)
-                    }}
-                    className="w-full sm:w-auto text-xs sm:text-sm font-bold border-slate-300 text-slate-800 bg-white hover:bg-slate-50 flex items-center justify-center gap-1.5 py-2.5 px-2 sm:px-4 rounded-xl cursor-pointer"
-                  >
-                    <ArrowRightLeft className="w-4 h-4 text-emerald-700 shrink-0" />
-                    <span>Transfer</span>
-                  </Button>
+                  {/*  */}
                 </>
               )}
             </div>
@@ -2060,11 +2272,6 @@ export function InventoryPage() {
                           <td className="py-2.5 px-3 sm:px-4">
                             <div className="flex flex-col">
                               <div className="flex items-center gap-1.5 flex-wrap">
-                                {p.code && (
-                                  <span className="font-mono text-[10px] font-black text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
-                                    {p.code}
-                                  </span>
-                                )}
                                 <span className="font-bold text-slate-900 text-xs sm:text-sm leading-snug">
                                   {p.name}
                                 </span>
@@ -2202,11 +2409,6 @@ export function InventoryPage() {
                     <div>
                       <div className="flex items-start justify-between gap-1.5">
                         <div>
-                          {p.code && (
-                            <span className="font-mono text-[10px] font-black text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200 mr-1.5">
-                              {p.code}
-                            </span>
-                          )}
                           <h4 className="text-sm font-bold text-slate-900 inline">{p.name}</h4>
                         </div>
                         <div className="flex flex-col items-end shrink-0">
@@ -2537,7 +2739,7 @@ export function InventoryPage() {
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
                 <label className="block font-bold text-slate-700 mb-1">Category</label>
                 <input
@@ -2550,7 +2752,20 @@ export function InventoryPage() {
               </div>
 
               <div>
-                <label className="block font-bold text-slate-700 mb-1">Initial Stock (Units) *</label>
+                <label className="block font-bold text-slate-700 mb-1">Unit *</label>
+                <select
+                  value={warehouseAddProductForm.unit || 'Piece'}
+                  onChange={(e) => setWarehouseAddProductForm({ ...warehouseAddProductForm, unit: e.target.value })}
+                  className="w-full p-2.5 bg-white border border-slate-300 rounded-xl font-bold min-h-[44px]"
+                >
+                  {INVENTORY_UNITS.map(u => (
+                    <option key={u} value={u}>{u}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Initial Stock Amount *</label>
                 <input
                   type="number"
                   min="0"
@@ -2577,7 +2792,7 @@ export function InventoryPage() {
               </div>
 
               <div>
-                <label className="block font-bold text-slate-700 mb-1">Cost Price (ETB) *</label>
+                <label className="block font-bold text-slate-700 mb-1">Cost / Purchase Price (ETB) *</label>
                 <input
                   type="number"
                   step="0.01"
@@ -2658,7 +2873,7 @@ export function InventoryPage() {
                 }`}
               >
                 <Plus className="w-3.5 h-3.5" />
-                <span>+ New Item</span>
+                <span>New Item</span>
               </button>
             </div>
 
@@ -2672,6 +2887,7 @@ export function InventoryPage() {
                       ...prev,
                       productId: newId,
                       costPerUnit: prod?.costPrice ? String(prod.costPrice) : prev.costPerUnit,
+                      unit: prod?.unit || prev.unit || 'Piece',
                     }))
                   }}
                   products={products}
@@ -2709,28 +2925,46 @@ export function InventoryPage() {
                     />
                   </div>
                   <div>
-                    <label className="block font-semibold text-slate-700 mb-0.5">Retail Selling Price (ETB) *</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      required
-                      value={warehouseDirectPurchaseForm.newProductSellingPrice}
-                      onChange={(e) => setWarehouseDirectPurchaseForm(prev => ({ ...prev, newProductSellingPrice: e.target.value }))}
-                      className="w-full p-2 bg-white border border-slate-300 rounded-lg text-xs font-bold text-emerald-700"
-                    />
+                    <label className="block font-semibold text-slate-700 mb-0.5">Unit *</label>
+                    <select
+                      value={warehouseDirectPurchaseForm.unit || 'Piece'}
+                      onChange={(e) => setWarehouseDirectPurchaseForm(prev => ({ ...prev, unit: e.target.value }))}
+                      className="w-full p-2 bg-white border border-slate-300 rounded-lg text-xs font-bold"
+                    >
+                      {INVENTORY_UNITS.map(u => (
+                        <option key={u} value={u}>{u}</option>
+                      ))}
+                    </select>
                   </div>
                 </div>
+                <p className="text-[10px] text-slate-500 italic">
+                  Note: Selling price and minimum stock alert will be set by the Owner during approval.
+                </p>
               </div>
             )}
 
-            <div className="grid grid-cols-2 gap-3 pt-1">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">Quantity *</label>
+                <label className="block font-semibold text-slate-700 mb-1">Purchase Price (ETB) *</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  required
+                  placeholder="e.g. 20"
+                  value={warehouseDirectPurchaseForm.costPerUnit}
+                  onChange={(e) => setWarehouseDirectPurchaseForm(prev => ({ ...prev, costPerUnit: e.target.value }))}
+                  className="w-full p-2.5 bg-white border border-slate-300 rounded-xl min-h-[44px] font-bold text-slate-800 text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Amount (Quantity) *</label>
                 <input
                   type="number"
                   min="1"
                   required
+                  placeholder="e.g. 10"
                   value={warehouseDirectPurchaseForm.quantity}
                   onChange={(e) => setWarehouseDirectPurchaseForm(prev => ({ ...prev, quantity: e.target.value }))}
                   className="w-full p-2.5 bg-white border border-slate-300 rounded-xl min-h-[44px] font-black text-slate-900 text-sm"
@@ -2738,16 +2972,16 @@ export function InventoryPage() {
               </div>
 
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">Cost / Unit (ETB) *</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  required
-                  value={warehouseDirectPurchaseForm.costPerUnit}
-                  onChange={(e) => setWarehouseDirectPurchaseForm(prev => ({ ...prev, costPerUnit: e.target.value }))}
+                <label className="block font-semibold text-slate-700 mb-1">Unit *</label>
+                <select
+                  value={warehouseDirectPurchaseForm.unit || 'Piece'}
+                  onChange={(e) => setWarehouseDirectPurchaseForm(prev => ({ ...prev, unit: e.target.value }))}
                   className="w-full p-2.5 bg-white border border-slate-300 rounded-xl min-h-[44px] font-bold text-slate-800 text-sm"
-                />
+                >
+                  {INVENTORY_UNITS.map(u => (
+                    <option key={u} value={u}>{u}</option>
+                  ))}
+                </select>
               </div>
             </div>
 
@@ -3022,7 +3256,7 @@ export function InventoryPage() {
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
                 <label className="block font-bold text-slate-700 mb-1">Category</label>
                 <input
@@ -3035,7 +3269,20 @@ export function InventoryPage() {
               </div>
 
               <div>
-                <label className="block font-bold text-slate-700 mb-1">Initial Stock (Units) *</label>
+                <label className="block font-bold text-slate-700 mb-1">Unit *</label>
+                <select
+                  value={storeAddProductForm.unit || 'Piece'}
+                  onChange={(e) => setStoreAddProductForm({ ...storeAddProductForm, unit: e.target.value })}
+                  className="w-full p-2.5 bg-white border border-slate-300 rounded-xl font-bold min-h-[44px]"
+                >
+                  {INVENTORY_UNITS.map(u => (
+                    <option key={u} value={u}>{u}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Initial Stock Amount *</label>
                 <input
                   type="number"
                   min="0"
@@ -3062,7 +3309,7 @@ export function InventoryPage() {
               </div>
 
               <div>
-                <label className="block font-bold text-slate-700 mb-1">Cost Price (ETB) *</label>
+                <label className="block font-bold text-slate-700 mb-1">Cost / Purchase Price (ETB) *</label>
                 <input
                   type="number"
                   step="0.01"
@@ -3143,7 +3390,7 @@ export function InventoryPage() {
                 }`}
               >
                 <Plus className="w-3.5 h-3.5" />
-                <span>+ New Item</span>
+                <span>New Item</span>
               </button>
             </div>
 
@@ -3157,6 +3404,7 @@ export function InventoryPage() {
                       ...prev,
                       productId: newId,
                       costPerUnit: prod?.costPrice ? String(prod.costPrice) : prev.costPerUnit,
+                      unit: prod?.unit || prev.unit || 'Piece',
                     }))
                   }}
                   products={products}
@@ -3194,28 +3442,46 @@ export function InventoryPage() {
                     />
                   </div>
                   <div>
-                    <label className="block font-semibold text-slate-700 mb-0.5">Retail Selling Price (ETB) *</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      required
-                      value={storeDirectPurchaseForm.newProductSellingPrice}
-                      onChange={(e) => setStoreDirectPurchaseForm(prev => ({ ...prev, newProductSellingPrice: e.target.value }))}
-                      className="w-full p-2 bg-white border border-slate-300 rounded-lg text-xs font-bold text-emerald-700"
-                    />
+                    <label className="block font-semibold text-slate-700 mb-0.5">Unit *</label>
+                    <select
+                      value={storeDirectPurchaseForm.unit || 'Piece'}
+                      onChange={(e) => setStoreDirectPurchaseForm(prev => ({ ...prev, unit: e.target.value }))}
+                      className="w-full p-2 bg-white border border-slate-300 rounded-lg text-xs font-bold"
+                    >
+                      {INVENTORY_UNITS.map(u => (
+                        <option key={u} value={u}>{u}</option>
+                      ))}
+                    </select>
                   </div>
                 </div>
+                <p className="text-[10px] text-slate-500 italic">
+                  Note: Selling price and minimum stock alert will be set by the Owner during approval.
+                </p>
               </div>
             )}
 
-            <div className="grid grid-cols-2 gap-3 pt-1">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">Quantity *</label>
+                <label className="block font-semibold text-slate-700 mb-1">Purchase Price (ETB) *</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  required
+                  placeholder="e.g. 20"
+                  value={storeDirectPurchaseForm.costPerUnit}
+                  onChange={(e) => setStoreDirectPurchaseForm(prev => ({ ...prev, costPerUnit: e.target.value }))}
+                  className="w-full p-2.5 bg-white border border-slate-300 rounded-xl min-h-[44px] font-bold text-slate-800 text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Amount (Quantity) *</label>
                 <input
                   type="number"
                   min="1"
                   required
+                  placeholder="e.g. 10"
                   value={storeDirectPurchaseForm.quantity}
                   onChange={(e) => setStoreDirectPurchaseForm(prev => ({ ...prev, quantity: e.target.value }))}
                   className="w-full p-2.5 bg-white border border-slate-300 rounded-xl min-h-[44px] font-black text-slate-900 text-sm"
@@ -3223,16 +3489,16 @@ export function InventoryPage() {
               </div>
 
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">Cost / Unit (ETB) *</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  required
-                  value={storeDirectPurchaseForm.costPerUnit}
-                  onChange={(e) => setStoreDirectPurchaseForm(prev => ({ ...prev, costPerUnit: e.target.value }))}
+                <label className="block font-semibold text-slate-700 mb-1">Unit *</label>
+                <select
+                  value={storeDirectPurchaseForm.unit || 'Piece'}
+                  onChange={(e) => setStoreDirectPurchaseForm(prev => ({ ...prev, unit: e.target.value }))}
                   className="w-full p-2.5 bg-white border border-slate-300 rounded-xl min-h-[44px] font-bold text-slate-800 text-sm"
-                />
+                >
+                  {INVENTORY_UNITS.map(u => (
+                    <option key={u} value={u}>{u}</option>
+                  ))}
+                </select>
               </div>
             </div>
 
@@ -3844,9 +4110,9 @@ export function InventoryPage() {
                           </div>
                         )}
 
-                        <div className="grid grid-cols-3 gap-2 items-end">
+                        <div className="grid grid-cols-4 gap-2 items-end">
                           <div>
-                            <label className="block text-[10px] font-semibold text-slate-700 mb-0.5">Quantity</label>
+                            <label className="block text-[10px] font-semibold text-slate-700 mb-0.5">Amount (Qty)</label>
                             <input
                               type="number"
                               min="1"
@@ -3857,7 +4123,19 @@ export function InventoryPage() {
                             />
                           </div>
                           <div>
-                            <label className="block text-[10px] font-semibold text-slate-700 mb-0.5">Cost/Unit (ETB)</label>
+                            <label className="block text-[10px] font-semibold text-slate-700 mb-0.5">Unit</label>
+                            <select
+                              value={item.unit || 'Piece'}
+                              onChange={(e) => handleUpdateBulkPurchaseRow(item.id, 'unit', e.target.value)}
+                              className="w-full p-2 bg-white border border-slate-300 rounded-lg text-xs font-bold text-slate-800"
+                            >
+                              {INVENTORY_UNITS.map(u => (
+                                <option key={u} value={u}>{u}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-semibold text-slate-700 mb-0.5">Purchase Price (ETB)</label>
                             <input
                               type="number"
                               step="0.01"
@@ -3937,6 +4215,7 @@ export function InventoryPage() {
                           ...purchaseForm,
                           productId: newId,
                           costPerUnit: prod ? prod.costPrice : purchaseForm.costPerUnit,
+                          unit: prod?.unit || purchaseForm.unit || 'Piece',
                         })
                       }}
                       products={products}
@@ -3986,9 +4265,9 @@ export function InventoryPage() {
                   </div>
                 )}
 
-                <div className="grid grid-cols-2 gap-2.5">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                   <div>
-                    <label className="block font-bold text-slate-700 mb-1">Quantity Received:</label>
+                    <label className="block font-bold text-slate-700 mb-1">Amount (Qty):</label>
                     <input
                       type="number"
                       min="1"
@@ -3999,7 +4278,19 @@ export function InventoryPage() {
                     />
                   </div>
                   <div>
-                    <label className="block font-bold text-slate-700 mb-1">Cost Per Unit (ETB):</label>
+                    <label className="block font-bold text-slate-700 mb-1">Unit:</label>
+                    <select
+                      value={purchaseForm.unit || 'Piece'}
+                      onChange={(e) => setPurchaseForm({ ...purchaseForm, unit: e.target.value })}
+                      className="w-full p-2.5 bg-white border border-slate-300 rounded-xl min-h-[44px] text-sm font-bold text-slate-800"
+                    >
+                      {INVENTORY_UNITS.map(u => (
+                        <option key={u} value={u}>{u}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">Purchase Price (ETB):</label>
                     <input
                       type="number"
                       step="0.01"
@@ -4123,7 +4414,7 @@ export function InventoryPage() {
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-2.5">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
               <div>
                 <label className="block font-semibold text-slate-700 mb-1">Category</label>
                 <input
@@ -4133,6 +4424,18 @@ export function InventoryPage() {
                   onChange={(e) => setStandaloneProductForm({ ...standaloneProductForm, category: e.target.value })}
                   className="w-full p-2.5 bg-white border border-slate-300 rounded-xl min-h-[44px]"
                 />
+              </div>
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Unit</label>
+                <select
+                  value={standaloneProductForm.unit || 'Piece'}
+                  onChange={(e) => setStandaloneProductForm({ ...standaloneProductForm, unit: e.target.value })}
+                  className="w-full p-2.5 bg-white border border-slate-300 rounded-xl min-h-[44px] font-bold"
+                >
+                  {INVENTORY_UNITS.map(u => (
+                    <option key={u} value={u}>{u}</option>
+                  ))}
+                </select>
               </div>
               <div>
                 <label className="block font-semibold text-slate-700 mb-1">Retail Selling Price (ETB) *</label>
@@ -4426,19 +4729,76 @@ export function InventoryPage() {
                         )}
                       </div>
 
-                      {/* Items table / list */}
-                      <div className="bg-slate-50 rounded-xl p-2.5 border border-slate-100 space-y-1">
-                        {req.items?.map((it, idx) => (
-                          <div key={idx} className="flex items-center justify-between text-xs">
-                            <span className="font-medium text-slate-800">
-                              {it.productName}
-                            </span>
-                            <span className="font-bold text-slate-900">
-                              {it.quantity} units {it.costPerUnit ? `@ ${it.costPerUnit.toLocaleString()} ETB` : ''}
-                            </span>
+                      {/* Items table / list with Owner Pricing Controls */}
+                      {isOwner && !isTransfer ? (
+                        <div className="space-y-2">
+                          <div className="text-[11px] font-bold text-amber-800 bg-amber-50/80 border border-amber-200/80 px-2.5 py-1.5 rounded-lg flex items-center gap-1.5">
+                            <AlertCircle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                            <span>Set Selling Price & Min Stock Alert before approving:</span>
                           </div>
-                        ))}
-                      </div>
+                          {req.items?.map((it, idx) => {
+                            const cfg = getApprovalItemConfig(req.id, it, idx)
+                            return (
+                              <div key={idx} className="bg-slate-50 rounded-xl p-2.5 border border-slate-200 space-y-2">
+                                <div className="flex items-center justify-between text-xs">
+                                  <div>
+                                    <span className="font-bold text-slate-900">{it.productName}</span>
+                                    <span className="text-slate-500 ml-1.5">
+                                      ({it.quantity} {it.unit || 'Piece'}{it.costPerUnit ? ` @ ${it.costPerUnit.toLocaleString()} ETB` : ''})
+                                    </span>
+                                  </div>
+                                  <Badge variant="outline" className="text-[10px] bg-white">
+                                    {it.unit || 'Piece'}
+                                  </Badge>
+                                </div>
+                                <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-200/60">
+                                  <div>
+                                    <label className="block text-[10px] font-bold uppercase text-slate-500 mb-0.5">
+                                      Selling Price (ETB) *
+                                    </label>
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      step="any"
+                                      value={cfg.sellingPrice}
+                                      onChange={(e) => handleUpdateApprovalItemConfig(req.id, it, idx, 'sellingPrice', e.target.value)}
+                                      className="w-full px-2 py-1 bg-white border border-slate-300 rounded-lg text-xs font-bold text-emerald-800 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                                      placeholder="Selling Price"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="block text-[10px] font-bold uppercase text-slate-500 mb-0.5">
+                                      Min Stock Alert (units)
+                                    </label>
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      step="1"
+                                      value={cfg.minStockThreshold}
+                                      onChange={(e) => handleUpdateApprovalItemConfig(req.id, it, idx, 'minStockThreshold', e.target.value)}
+                                      className="w-full px-2 py-1 bg-white border border-slate-300 rounded-lg text-xs font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                                      placeholder="Min Stock Alert"
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      ) : (
+                        <div className="bg-slate-50 rounded-xl p-2.5 border border-slate-100 space-y-1">
+                          {req.items?.map((it, idx) => (
+                            <div key={idx} className="flex items-center justify-between text-xs">
+                              <span className="font-medium text-slate-800">
+                                {it.productName}
+                              </span>
+                              <span className="font-bold text-slate-900">
+                                {it.quantity} {it.unit || 'units'} {it.costPerUnit ? `@ ${it.costPerUnit.toLocaleString()} ETB` : ''}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
 
                       {req.notes && (
                         <div className="text-xs text-slate-600 bg-amber-50/60 p-2 rounded-lg border border-amber-100">
@@ -4478,8 +4838,21 @@ export function InventoryPage() {
                           onClick={async () => {
                             setProcessingApprovalId(req.id)
                             try {
-                              await approveApprovalRequest(req.id)
-                              toast.success('Request Approved', 'Stock has been updated automatically!')
+                              let productConfigs = undefined
+                              if (req.type === 'direct_purchase' && req.items?.length > 0) {
+                                productConfigs = req.items.map((it, idx) => {
+                                  const cfg = getApprovalItemConfig(req.id, it, idx)
+                                  return {
+                                    productId: it.productId || `item_${idx}`,
+                                    sellingPrice: parseFloat(cfg.sellingPrice) || undefined,
+                                    minStockThreshold: parseInt(cfg.minStockThreshold, 10) || undefined,
+                                    costPrice: it.costPerUnit || undefined,
+                                    unit: cfg.unit || it.unit || 'Piece',
+                                  }
+                                })
+                              }
+                              await approveApprovalRequest(req.id, productConfigs)
+                              toast.success('Request Approved', 'Stock and product catalog have been updated automatically!')
                             } catch (err) {
                               toast.error('Approval Failed', err.message || 'Could not approve request.')
                             } finally {
@@ -4497,6 +4870,307 @@ export function InventoryPage() {
                 })}
               </div>
             )}
+          </div>
+        </Modal>
+      )}
+
+      {/* Bulk Excel Import Modal */}
+      {isImportExcelModalOpen && (
+        <Modal
+          isOpen={isImportExcelModalOpen}
+          onClose={() => {
+            if (!isImportingExcel) setIsImportExcelModalOpen(false)
+          }}
+          title="Single-Click Excel Inventory Import"
+        >
+          <div className="space-y-5">
+            <p className="text-xs sm:text-sm text-slate-500">
+              Populate your Warehouse and Retail Store directly from an Excel spreadsheet (<span className="font-semibold text-slate-700">.xlsx, .xls, .csv</span>).
+            </p>
+
+            {/* Quick 1-Click Kaya Yasmin Auto Parts Preset */}
+            <div className="bg-gradient-to-br from-emerald-50 to-teal-50/60 border border-emerald-200/80 rounded-2xl p-4 sm:p-5 shadow-xs">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-sm mt-0.5">
+                  <Zap className="w-5 h-5" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap mb-1">
+                    <h4 className="text-sm font-bold text-slate-900">
+                      1-Click Import: Kaya Yasmin Auto Parts
+                    </h4>
+                    <Badge variant="success" className="text-[10px] uppercase font-bold py-0.5 px-2">
+                      Pre-Packaged
+                    </Badge>
+                  </div>
+                  <p className="text-xs text-slate-600 leading-relaxed mb-3">
+                    Load all <strong>219 auto parts</strong> directly:
+                    <span className="inline-block mx-1 font-semibold text-emerald-800">6 Warehouse products (225 units of gas cylinders)</span>
+                    &amp;
+                    <span className="inline-block mx-1 font-semibold text-blue-800">218 Store products (1,965 units of parts &amp; oils)</span>.
+                    Oils default to <strong>0.5% commission</strong> and general parts to <strong>2.5%</strong>. Only items allocated to each location will show there!
+                  </p>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="primary"
+                    disabled={isImportingExcel}
+                    onClick={handleLoadPreloadedExcel}
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs"
+                  >
+                    <Zap className="w-3.5 h-3.5 mr-1.5" />
+                    Load Kaya Yasmin Auto Parts (219 Items)
+                  </Button>
+                </div>
+              </div>
+            </div>
+
+            {/* Custom Excel File Upload */}
+            <div className="border border-dashed border-slate-300 hover:border-emerald-400 transition-colors rounded-2xl p-5 text-center bg-slate-50/50">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".xlsx, .xls, .csv"
+                onChange={handleExcelFileChange}
+                disabled={isImportingExcel}
+                className="hidden"
+              />
+              <UploadCloud className="w-9 h-9 text-slate-400 mx-auto mb-2" />
+              <h5 className="text-xs sm:text-sm font-bold text-slate-800 mb-1">
+                Or Upload Any Inventory Excel / CSV
+              </h5>
+              <p className="text-[11px] sm:text-xs text-slate-500 max-w-sm mx-auto mb-3">
+                Supports multi-sheet workbooks with sheets named <em>"Inventory store"</em> (Warehouse) and <em>"Inventory shop"</em> (Store), or standard inventory spreadsheets.
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={isImportingExcel}
+                onClick={() => fileInputRef.current?.click()}
+                className="font-bold text-xs bg-white text-slate-700 border-slate-300 hover:bg-slate-100"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5 mr-1.5 text-emerald-600" />
+                Select Excel File (.xlsx, .xls, .csv)
+              </Button>
+            </div>
+
+            {/* Parsed Data Preview */}
+            {excelParsedData && (
+              <div className="space-y-3 border-t border-slate-100 pt-3">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div className="flex items-center gap-2">
+                    <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                    <span className="text-xs font-bold text-slate-800 truncate max-w-xs">
+                      {excelParsedData.fileName}
+                    </span>
+                  </div>
+                  <span className="text-[11px] font-semibold text-slate-500">
+                    {excelParsedData.sheetsDetected?.join(' • ')}
+                  </span>
+                </div>
+
+                {/* Summary badges */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <div className="bg-slate-100/80 rounded-xl p-2.5 text-center">
+                    <span className="text-[10px] text-slate-500 block uppercase font-bold">Total Products</span>
+                    <span className="text-base font-extrabold text-slate-900">{excelParsedData.summary.totalProducts}</span>
+                  </div>
+                  <div className="bg-amber-50 rounded-xl p-2.5 text-center border border-amber-100">
+                    <span className="text-[10px] text-amber-700 block uppercase font-bold">Warehouse Stock</span>
+                    <span className="text-base font-extrabold text-amber-900">{excelParsedData.summary.warehouseUnits.toLocaleString()} units</span>
+                  </div>
+                  <div className="bg-blue-50 rounded-xl p-2.5 text-center border border-blue-100">
+                    <span className="text-[10px] text-blue-700 block uppercase font-bold">Store Stock</span>
+                    <span className="text-base font-extrabold text-blue-900">{excelParsedData.summary.storeUnits.toLocaleString()} units</span>
+                  </div>
+                  <div className="bg-purple-50 rounded-xl p-2.5 text-center border border-purple-100">
+                    <span className="text-[10px] text-purple-700 block uppercase font-bold">Oils (0.5% Comm.)</span>
+                    <span className="text-base font-extrabold text-purple-900">{excelParsedData.summary.oilProductsCount} items</span>
+                  </div>
+                </div>
+
+                {/* Quick 6-row preview table */}
+                <div className="border border-slate-200 rounded-xl overflow-hidden max-h-48 overflow-y-auto text-xs">
+                  <table className="w-full text-left">
+                    <thead className="bg-slate-100 text-slate-600 font-semibold sticky top-0">
+                      <tr>
+                        <th className="py-2 px-3">Item Name</th>
+                        <th className="py-2 px-2">Category</th>
+                        <th className="py-2 px-2 text-right">Wh Qty</th>
+                        <th className="py-2 px-2 text-right">Store Qty</th>
+                        <th className="py-2 px-2 text-right">Selling Price</th>
+                        <th className="py-2 px-2 text-center">Comm.</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {excelParsedData.items.slice(0, 6).map((item, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50/50">
+                          <td className="py-2 px-3 font-medium text-slate-800 truncate max-w-[160px]">{item.name}</td>
+                          <td className="py-2 px-2 text-slate-500 truncate max-w-[100px]">{item.category}</td>
+                          <td className="py-2 px-2 text-right font-bold text-amber-700">
+                            {item.warehouseStock !== undefined ? item.warehouseStock : '—'}
+                          </td>
+                          <td className="py-2 px-2 text-right font-bold text-blue-700">
+                            {item.storeStock !== undefined ? item.storeStock : '—'}
+                          </td>
+                          <td className="py-2 px-2 text-right font-medium text-slate-700">
+                            {item.sellingPriceRange || (item.sellingPrice ? formatCurrency(item.sellingPrice) : '—')}
+                          </td>
+                          <td className="py-2 px-2 text-center">
+                            <Badge variant={item.defaultCommissionRate === 0.5 ? 'secondary' : 'default'} className="text-[10px] py-0 px-1">
+                              {item.defaultCommissionRate}%
+                            </Badge>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {excelParsedData.items.length > 6 && (
+                    <div className="p-2 text-center bg-slate-50 text-[11px] text-slate-500 font-medium">
+                      + {excelParsedData.items.length - 6} more products ready to populate
+                    </div>
+                  )}
+                </div>
+
+                {/* Option to clear existing catalog */}
+                <label className="flex items-start gap-2.5 p-3 rounded-xl bg-slate-50 border border-slate-200 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={excelImportClearExisting}
+                    onChange={(e) => setExcelImportClearExisting(e.target.checked)}
+                    className="mt-0.5 rounded text-primary focus:ring-primary h-4 w-4"
+                  />
+                  <div className="text-xs">
+                    <span className="font-bold text-slate-800 block">
+                      Replace &amp; clean existing products first (Recommended)
+                    </span>
+                    <span className="text-slate-500 text-[11px] leading-tight block">
+                      Clears old test items and resets stocks so your inventory cleanly matches the Excel workbook.
+                    </span>
+                  </div>
+                </label>
+              </div>
+            )}
+
+            {/* Actions */}
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+              <Button
+                type="button"
+                variant="secondary"
+                size="md"
+                disabled={isImportingExcel}
+                onClick={() => setIsImportExcelModalOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                variant="primary"
+                size="md"
+                disabled={!excelParsedData || isImportingExcel}
+                onClick={handleConfirmBulkImport}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold"
+              >
+                {isImportingExcel ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                    Populating Inventory...
+                  </>
+                ) : (
+                  <>
+                    <UploadCloud className="w-4 h-4 mr-2" />
+                    Populate Warehouse &amp; Store Now
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Clear Database Modal */}
+      {isClearDbModalOpen && isOwner && (
+        <Modal
+          isOpen={isClearDbModalOpen}
+          onClose={() => {
+            if (!isClearingDatabase) {
+              setIsClearDbModalOpen(false)
+              setClearDbConfirmationText('')
+            }
+          }}
+          title="Clear Database & Reset All Inventory"
+        >
+          <div className="space-y-4">
+            <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 text-rose-900">
+              <div className="flex items-center gap-2 font-bold text-sm mb-1 text-rose-800">
+                <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0" />
+                Permanent Action - Cannot be undone
+              </div>
+              <p className="text-xs text-rose-700 leading-relaxed">
+                Clearing the database will permanently delete all business catalog and transaction records for this organization.
+              </p>
+            </div>
+
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-2 text-xs text-slate-700">
+              <span className="font-bold text-slate-900 block">The following data will be wiped:</span>
+              <ul className="list-disc pl-5 space-y-1 text-slate-600">
+                <li>All products and categories in the catalog</li>
+                <li>All warehouse stock quantities (reset to empty)</li>
+                <li>All retail store stock quantities (reset to empty)</li>
+                <li>All pending &amp; past stock transfer / purchase approvals</li>
+                <li>All sales transactions and audit activity logs</li>
+              </ul>
+            </div>
+
+            <div className="space-y-2">
+              <label className="block text-xs font-bold text-slate-800">
+                To confirm, type <span className="font-mono text-rose-700 uppercase bg-rose-50 px-1 py-0.5 rounded border border-rose-200">CLEAR</span> below:
+              </label>
+              <input
+                type="text"
+                value={clearDbConfirmationText}
+                onChange={(e) => setClearDbConfirmationText(e.target.value)}
+                placeholder="Type CLEAR to confirm"
+                disabled={isClearingDatabase}
+                className="w-full text-sm px-3.5 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-rose-500 font-mono"
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+              <Button
+                type="button"
+                variant="secondary"
+                size="md"
+                disabled={isClearingDatabase}
+                onClick={() => {
+                  setIsClearDbModalOpen(false)
+                  setClearDbConfirmationText('')
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                variant="danger"
+                size="md"
+                disabled={clearDbConfirmationText.trim().toUpperCase() !== 'CLEAR' || isClearingDatabase}
+                onClick={handleConfirmClearDatabase}
+                className="bg-rose-600 hover:bg-rose-700 text-white font-bold"
+              >
+                {isClearingDatabase ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                    Wiping Database...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-4 h-4 mr-2" />
+                    Wipe &amp; Reset Everything
+                  </>
+                )}
+              </Button>
+            </div>
           </div>
         </Modal>
       )}

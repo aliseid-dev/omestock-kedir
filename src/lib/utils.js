@@ -10,15 +10,15 @@ export function cn(...inputs) {
 }
 
 /**
- * Formats a number as currency
+ * Formats a number as Ethiopian Birr (ETB) currency
  */
-export function formatCurrency(amount, currency = 'USD') {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: currency,
+export function formatCurrency(amount, currency = 'ETB') {
+  const num = typeof amount === 'number' ? amount : parseFloat(amount) || 0
+  const formatted = new Intl.NumberFormat('en-US', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  }).format(amount || 0)
+  }).format(num)
+  return `${formatted} ETB`
 }
 
 /**

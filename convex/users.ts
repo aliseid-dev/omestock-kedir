@@ -264,6 +264,15 @@ export const clearOrganizationData = mutation({
       await ctx.db.delete(l._id);
     }
 
+    // 3b. Delete all approval requests for this client
+    const approvals = await ctx.db
+      .query("approvalRequests")
+      .withIndex("by_clientId", (q) => q.eq("clientId", args.clientId))
+      .collect();
+    for (const a of approvals) {
+      await ctx.db.delete(a._id);
+    }
+
     // 4. Reset stock to empty {} in warehouses
     const warehouses = await ctx.db
       .query("warehouses")

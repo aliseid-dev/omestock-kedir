@@ -4,7 +4,7 @@ import {
   Plus,
   Minus,
   Trash2,
-  DollarSign,
+  Banknote,
   CreditCard,
   Building,
   CheckCircle,
@@ -30,6 +30,14 @@ import { Badge } from '../components/ui/Badge'
 import { Modal } from '../components/ui/Modal'
 import { formatCurrency } from '../lib/utils'
 import { ETHIOPIAN_PAYMENT_PROVIDERS, DEFAULT_BANK } from '../lib/ethiopian-banks'
+
+export const getProductCommissionRate = (product) => {
+  if (product?.defaultCommissionRate !== undefined && product?.defaultCommissionRate !== null) {
+    return product.defaultCommissionRate
+  }
+  const isOil = ((product?.name || '') + ' ' + (product?.category || '')).toLowerCase().includes('oil')
+  return isOil ? 0.5 : 2.5
+}
 
 export function PosPage() {
   const { stores, warehouses, products, staff, recordSale } = useTenant()
@@ -196,7 +204,8 @@ export function PosPage() {
         return
       }
       const unitPrice = product.sellingPrice || 0
-      const commissionAmount = (unitPrice * 1 * (product.defaultCommissionRate || 5)) / 100
+      const commRate = getProductCommissionRate(product)
+      const commissionAmount = (unitPrice * 1 * commRate) / 100
       setCart([...cart, { product, quantity: 1, customPrice: unitPrice, commissionAmount }])
     }
   }
@@ -211,7 +220,8 @@ export function PosPage() {
 
     setCart(cart.map(i => {
       if (i.product.id === productId) {
-        const commissionAmount = (validPrice * i.quantity * (i.product.defaultCommissionRate || 5)) / 100
+        const commRate = getProductCommissionRate(i.product)
+        const commissionAmount = (validPrice * i.quantity * commRate) / 100
         return { ...i, customPrice: validPrice, commissionAmount }
       }
       return i
@@ -238,7 +248,8 @@ export function PosPage() {
     setCart(cart.map(i => {
       if (i.product.id === productId) {
         const unitPrice = i.customPrice !== undefined && !isNaN(i.customPrice) ? i.customPrice : (i.product.sellingPrice || 0)
-        const commissionAmount = (unitPrice * parsedQty * (i.product.defaultCommissionRate || 5)) / 100
+        const commRate = getProductCommissionRate(i.product)
+        const commissionAmount = (unitPrice * parsedQty * commRate) / 100
         return { ...i, quantity: parsedQty, commissionAmount }
       }
       return i
@@ -312,7 +323,7 @@ export function PosPage() {
           quantity: item.quantity,
           unitPrice,
           costPrice: item.product.costPrice,
-          commissionRate: item.product.defaultCommissionRate || 5,
+          commissionRate: getProductCommissionRate(item.product),
           commissionAmount: item.commissionAmount,
         }
       })
@@ -364,9 +375,6 @@ export function PosPage() {
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex-1 pr-1">
                     <div className="flex items-center gap-1.5 flex-wrap">
-                      {product.code && (
-                        <span className="font-mono text-[10px] bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded font-bold">{product.code}</span>
-                      )}
                       <p className="font-bold text-slate-900 line-clamp-1">{product.name}</p>
                     </div>
                     <p className="text-[11px] text-slate-500 mt-0.5">
@@ -464,7 +472,7 @@ export function PosPage() {
         </label>
         <div className="grid grid-cols-3 gap-2">
           {[
-            { id: 'Cash', icon: DollarSign },
+            { id: 'Cash', icon: Banknote },
             { id: 'Banking', icon: Building },
             { id: 'Credit', icon: CreditCard, disabled: !canMakeCreditSales }
           ].map(method => (
@@ -832,11 +840,6 @@ export function PosPage() {
                           <td className="py-2 pl-3 pr-1 sm:px-4 align-middle">
                             <div className="flex flex-col">
                               <div className="flex items-center gap-1.5 flex-wrap">
-                                {product.code && (
-                                  <span className="font-mono text-[10px] font-black text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200 shrink-0">
-                                    {product.code}
-                                  </span>
-                                )}
                                 <span className="font-bold text-slate-900 text-xs sm:text-sm leading-tight">
                                   {product.name}
                                 </span>
@@ -849,7 +852,7 @@ export function PosPage() {
                                     <span className="truncate max-w-[120px]">{product.category}</span>
                                   </>
                                 )}
-                                <span className="hidden sm:inline">&bull; Comm: {product.defaultCommissionRate}%</span>
+                                <span className="hidden sm:inline">&bull; Comm: {getProductCommissionRate(product)}%</span>
                               </div>
                             </div>
                           </td>
@@ -860,7 +863,7 @@ export function PosPage() {
                               {product.category || 'General'}
                             </span>
                             <span className="block text-[10px] text-slate-400 mt-0.5">
-                              Comm: {product.defaultCommissionRate}%
+                              Comm: {getProductCommissionRate(product)}%
                             </span>
                           </td>
 
@@ -999,11 +1002,6 @@ export function PosPage() {
                       <div className="flex items-start justify-between gap-2">
                         <div className="flex-1">
                           <div className="flex items-center gap-1.5 flex-wrap mb-1">
-                            {product.code && (
-                              <span className="font-mono text-[10px] font-bold bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded">
-                                {product.code}
-                              </span>
-                            )}
                             {product.unit && (
                               <span className="text-[10px] font-medium text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">
                                 {product.unit}
@@ -1033,7 +1031,7 @@ export function PosPage() {
 
                     <div className="mt-4 pt-2.5 border-t border-slate-100 flex items-center justify-between text-xs">
                       <span className="text-slate-500 font-medium">
-                        Comm: <span className="font-bold text-slate-800">{product.defaultCommissionRate}%</span>
+                        Comm: <span className="font-bold text-slate-800">{getProductCommissionRate(product)}%</span>
                       </span>
                       <div className="flex items-center gap-1.5">
                         {isOut ? (
@@ -1270,13 +1268,6 @@ export function PosPage() {
                         }`}
                       >
                         <div className="flex items-center gap-1.5 min-w-0 pr-2">
-                          {p.code && (
-                            <span className={`font-mono text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0 ${
-                              isSelected ? 'bg-slate-800 text-blue-300' : 'bg-blue-50 text-blue-700 border border-blue-200'
-                            }`}>
-                              {p.code}
-                            </span>
-                          )}
                           <span className="font-bold text-xs truncate">{p.name}</span>
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
@@ -1302,11 +1293,6 @@ export function PosPage() {
                     Stock across all locations:
                   </p>
                   <div className="flex items-center gap-1.5">
-                    {inspectProduct.code && (
-                      <span className="font-mono text-[10px] font-bold bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded">
-                        {inspectProduct.code}
-                      </span>
-                    )}
                     <span className="text-xs font-black text-emerald-700">
                       {inspectProduct.sellingPriceRange ? `${inspectProduct.sellingPriceRange} ETB` : formatCurrency(inspectProduct.sellingPrice)}
                     </span>

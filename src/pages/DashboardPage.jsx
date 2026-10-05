@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import {
   TrendingUp,
-  DollarSign,
+  Banknote,
   Package,
   AlertTriangle,
   ClockAlert,
@@ -185,7 +185,7 @@ export function DashboardPage() {
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Gross Sales</span>
               <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
-                <DollarSign className="w-4 h-4" />
+                <Banknote className="w-4 h-4" />
               </div>
             </div>
             <div className="mt-2.5">

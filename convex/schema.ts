@@ -126,6 +126,9 @@ export default defineSchema({
         productCode: v.optional(v.string()),
         quantity: v.number(),
         costPerUnit: v.optional(v.number()),
+        unit: v.optional(v.string()),
+        sellingPrice: v.optional(v.number()),
+        minStockThreshold: v.optional(v.number()),
       })
     ),
     paymentMethod: v.optional(v.string()),

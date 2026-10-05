@@ -83,6 +83,29 @@ export const normalizeLocationNames = mutation({
         await ctx.db.patch(st._id, { name: "Store 1" });
       }
     }
+
+    // Clean up ghost warehouse zero-stock entries (items with 0 stock that only belong to the store)
+    for (const wh of warehouses) {
+      if (wh.stock && Object.keys(wh.stock).length > 15) {
+        const cleanedWhStock: Record<string, number> = {};
+        for (const [prodId, qty] of Object.entries(wh.stock)) {
+          if ((qty as number) > 0) {
+            cleanedWhStock[prodId] = qty as number;
+          } else {
+            // Keep 0-stock only if it is genuinely a warehouse product (e.g. Gas Cylinders)
+            try {
+              const prod = await ctx.db.get(prodId as any);
+              if (prod && (prod.category?.toLowerCase().includes("gas") || prod.name?.toLowerCase().includes("gas"))) {
+                cleanedWhStock[prodId] = 0;
+              }
+            } catch {
+              // Ignore invalid ID
+            }
+          }
+        }
+        await ctx.db.patch(wh._id, { stock: cleanedWhStock });
+      }
+    }
   },
 });
 
@@ -108,6 +131,9 @@ export const createProduct = mutation({
   },
   handler: async (ctx, args) => {
     const now = new Date().toISOString();
+    const isOil = (args.name + " " + (args.category || "")).toLowerCase().includes("oil");
+    const defaultComm = isOil ? 0.5 : 2.5;
+
     const productId = await ctx.db.insert("products", {
       clientId: args.clientId,
       name: args.name.trim(),
@@ -119,35 +145,29 @@ export const createProduct = mutation({
       minSellingPrice: args.minSellingPrice,
       maxSellingPrice: args.maxSellingPrice,
       costPrice: args.costPrice,
-      defaultCommissionRate: args.defaultCommissionRate ?? 5,
+      defaultCommissionRate: args.defaultCommissionRate ?? defaultComm,
       minStockThreshold: args.minStockThreshold ?? 5,
       notes: args.notes?.trim() || undefined,
       createdAt: now,
     });
 
-    // Initialize stock across all client warehouses and stores
-    const warehouses = await ctx.db
-      .query("warehouses")
-      .withIndex("by_clientId", (q) => q.eq("clientId", args.clientId))
-      .collect();
-
-    for (const wh of warehouses) {
-      const stock = wh.stock || {};
-      const initial = (args.initialWarehouseId && args.initialWarehouseId === wh._id) ? (args.initialQuantity || 0) : 0;
-      stock[productId] = initial;
-      await ctx.db.patch(wh._id, { stock });
+    // Initialize stock only in the explicitly chosen location
+    if (args.initialWarehouseId) {
+      const wh = await ctx.db.get(args.initialWarehouseId);
+      if (wh) {
+        const stock = { ...(wh.stock || {}) };
+        stock[productId] = Math.max(0, args.initialQuantity || 0);
+        await ctx.db.patch(wh._id, { stock });
+      }
     }
 
-    const stores = await ctx.db
-      .query("stores")
-      .withIndex("by_clientId", (q) => q.eq("clientId", args.clientId))
-      .collect();
-
-    for (const st of stores) {
-      const stock = st.stock || {};
-      const initial = (args.initialStoreId && args.initialStoreId === st._id) ? (args.initialQuantity || 0) : 0;
-      stock[productId] = initial;
-      await ctx.db.patch(st._id, { stock });
+    if (args.initialStoreId) {
+      const st = await ctx.db.get(args.initialStoreId);
+      if (st) {
+        const stock = { ...(st.stock || {}) };
+        stock[productId] = Math.max(0, args.initialQuantity || 0);
+        await ctx.db.patch(st._id, { stock });
+      }
     }
 
     return await ctx.db.get(productId);
@@ -254,6 +274,7 @@ export const seedSampleInventory = mutation({
           minStockThreshold: item.minStockThreshold,
         });
       } else {
+        const isOil = (item.name + " " + item.category).toLowerCase().includes("oil");
         prodId = await ctx.db.insert("products", {
           clientId: args.clientId,
           name: item.name,
@@ -263,7 +284,7 @@ export const seedSampleInventory = mutation({
           costPrice: item.costPrice,
           sellingPrice: item.sellingPrice,
           sellingPriceRange: item.sellingPriceRange,
-          defaultCommissionRate: 5,
+          defaultCommissionRate: isOil ? 0.5 : 2.5,
           minStockThreshold: item.minStockThreshold,
           createdAt: now,
         });
@@ -507,3 +528,206 @@ export const deleteStore = mutation({
     return true;
   },
 });
+
+// Bulk Import Inventory from Excel file
+export const bulkImportInventory = mutation({
+  args: {
+    clientId: v.id("clients"),
+    items: v.array(
+      v.object({
+        name: v.string(),
+        code: v.optional(v.string()),
+        category: v.optional(v.string()),
+        unit: v.optional(v.string()),
+        costPrice: v.optional(v.number()),
+        sellingPrice: v.number(),
+        sellingPriceRange: v.optional(v.string()),
+        minStockThreshold: v.optional(v.number()),
+        defaultCommissionRate: v.optional(v.number()),
+        warehouseStock: v.optional(v.number()),
+        storeStock: v.optional(v.number()),
+      })
+    ),
+    clearExisting: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args) => {
+    const now = new Date().toISOString();
+
+    // 1. Fetch or create Warehouse & Store for this client
+    let warehouses = await ctx.db
+      .query("warehouses")
+      .withIndex("by_clientId", (q) => q.eq("clientId", args.clientId))
+      .collect();
+
+    if (warehouses.length === 0) {
+      const whId = await ctx.db.insert("warehouses", {
+        clientId: args.clientId,
+        name: "Warehouse",
+        location: "Central Storage",
+        stock: {},
+        createdAt: now,
+      });
+      const newWh = await ctx.db.get(whId);
+      if (newWh) warehouses = [newWh];
+    }
+
+    let stores = await ctx.db
+      .query("stores")
+      .withIndex("by_clientId", (q) => q.eq("clientId", args.clientId))
+      .collect();
+
+    if (stores.length === 0) {
+      const stId = await ctx.db.insert("stores", {
+        clientId: args.clientId,
+        name: "Store 1",
+        location: "Retail Shop",
+        stock: {},
+        createdAt: now,
+      });
+      const newSt = await ctx.db.get(stId);
+      if (newSt) stores = [newSt];
+    }
+
+    const primaryWh = warehouses[0];
+    const primarySt = stores[0];
+
+    // 2. If clearExisting is requested, wipe existing products, sales, approvals and reset stocks
+    if (args.clearExisting) {
+      const existingProducts = await ctx.db
+        .query("products")
+        .withIndex("by_clientId", (q) => q.eq("clientId", args.clientId))
+        .collect();
+      for (const p of existingProducts) {
+        await ctx.db.delete(p._id);
+      }
+
+      const existingSales = await ctx.db
+        .query("sales")
+        .withIndex("by_clientId", (q) => q.eq("clientId", args.clientId))
+        .collect();
+      for (const s of existingSales) {
+        await ctx.db.delete(s._id);
+      }
+
+      const approvals = await ctx.db
+        .query("approvalRequests")
+        .withIndex("by_clientId", (q) => q.eq("clientId", args.clientId))
+        .collect();
+      for (const a of approvals) {
+        await ctx.db.delete(a._id);
+      }
+
+      for (const wh of warehouses) {
+        await ctx.db.patch(wh._id, { stock: {} });
+      }
+      for (const st of stores) {
+        await ctx.db.patch(st._id, { stock: {} });
+      }
+    }
+
+    // 3. Fetch products to update or insert
+    const currentProducts = await ctx.db
+      .query("products")
+      .withIndex("by_clientId", (q) => q.eq("clientId", args.clientId))
+      .collect();
+
+    const whStock = primaryWh ? { ...(primaryWh.stock || {}) } : {};
+    const stStock = primarySt ? { ...(primarySt.stock || {}) } : {};
+
+    let totalWhUnits = 0;
+    let totalStUnits = 0;
+
+    for (const item of args.items) {
+      const trimmedName = item.name.trim();
+      if (!trimmedName) continue;
+
+      const trimmedCode = item.code?.trim();
+      const existingProd = currentProducts.find(
+        (p) =>
+          (trimmedCode && p.code && p.code.toLowerCase() === trimmedCode.toLowerCase()) ||
+          p.name.toLowerCase() === trimmedName.toLowerCase()
+      );
+
+      const isOil = (trimmedName + " " + (item.category || "")).toLowerCase().includes("oil");
+      const defaultCommission =
+        item.defaultCommissionRate !== undefined
+          ? item.defaultCommissionRate
+          : isOil
+          ? 0.5
+          : 2.5;
+
+      const costPrice = item.costPrice !== undefined ? item.costPrice : 0;
+      const sellingPrice =
+        item.sellingPrice || (costPrice > 0 ? Math.round(costPrice * 1.25) : 30);
+      const minStockThreshold =
+        item.minStockThreshold !== undefined ? item.minStockThreshold : 5;
+      const unit = item.unit || "Piece";
+
+      let prodId: any;
+
+      if (existingProd) {
+        prodId = existingProd._id;
+        await ctx.db.patch(prodId, {
+          name: trimmedName,
+          code: trimmedCode || existingProd.code,
+          category: item.category || existingProd.category,
+          unit,
+          costPrice,
+          sellingPrice,
+          sellingPriceRange: item.sellingPriceRange || existingProd.sellingPriceRange,
+          defaultCommissionRate: defaultCommission,
+          minStockThreshold,
+        });
+      } else {
+        prodId = await ctx.db.insert("products", {
+          clientId: args.clientId,
+          name: trimmedName,
+          code: trimmedCode,
+          category: item.category || "General",
+          unit,
+          costPrice,
+          sellingPrice,
+          sellingPriceRange: item.sellingPriceRange,
+          defaultCommissionRate: defaultCommission,
+          minStockThreshold,
+          createdAt: now,
+        });
+      }
+
+      if (primaryWh && item.warehouseStock !== undefined) {
+        whStock[prodId] = Math.max(0, item.warehouseStock);
+        totalWhUnits += Math.max(0, item.warehouseStock);
+      }
+      if (primarySt && item.storeStock !== undefined) {
+        stStock[prodId] = Math.max(0, item.storeStock);
+        totalStUnits += Math.max(0, item.storeStock);
+      }
+    }
+
+    if (primaryWh) {
+      await ctx.db.patch(primaryWh._id, { stock: whStock });
+    }
+    if (primarySt) {
+      await ctx.db.patch(primarySt._id, { stock: stStock });
+    }
+
+    // 4. Log to Audit Trail
+    await ctx.db.insert("auditLogs", {
+      clientId: args.clientId,
+      actorId: "owner",
+      actorName: "Business Owner",
+      role: "owner",
+      action: "EXCEL_INVENTORY_IMPORTED",
+      description: `Bulk imported ${args.items.length} products from Excel spreadsheet (Warehouse: ${totalWhUnits} units, Store: ${totalStUnits} units).`,
+      timestamp: now,
+    });
+
+    return {
+      success: true,
+      importedCount: args.items.length,
+      warehouseUnits: totalWhUnits,
+      storeUnits: totalStUnits,
+    };
+  },
+});
+

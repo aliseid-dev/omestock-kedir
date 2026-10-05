@@ -31,21 +31,67 @@ export function NotificationsPage() {
     pendingApprovals,
     approvalHistory,
     approveApprovalRequest,
-    rejectApprovalRequest
+    rejectApprovalRequest,
+    products
   } = useTenant()
 
   const [activeTab, setActiveTab] = useState('pending') // 'pending' | 'history'
   const [processingId, setProcessingId] = useState(null)
   const [rejectPromptId, setRejectPromptId] = useState(null)
   const [rejectReason, setRejectReason] = useState('')
+  const [approvalConfigs, setApprovalConfigs] = useState({})
 
   const pendingCount = pendingApprovals?.length || 0
   const historyList = approvalHistory || []
 
+  const getItemConfig = (reqId, it, idx) => {
+    const itemKey = `${reqId}_${it.productId || idx}`
+    if (approvalConfigs[itemKey]) {
+      return approvalConfigs[itemKey]
+    }
+    const matchedProd = products?.find(
+      (p) => p.id === it.productId || (it.productName && p.name?.toLowerCase().trim() === it.productName?.toLowerCase().trim())
+    )
+    const cost = it.costPerUnit || matchedProd?.costPrice || 0
+    const defaultSellingPrice = it.sellingPrice || matchedProd?.sellingPrice || (cost > 0 ? Math.round(cost * 1.25) : 30)
+    const defaultMinStock = it.minStockThreshold || matchedProd?.minStockThreshold || 5
+    return {
+      sellingPrice: defaultSellingPrice,
+      minStockThreshold: defaultMinStock,
+      unit: it.unit || matchedProd?.unit || 'Piece',
+    }
+  }
+
+  const handleUpdateItemConfig = (reqId, it, idx, field, value) => {
+    const itemKey = `${reqId}_${it.productId || idx}`
+    const current = getItemConfig(reqId, it, idx)
+    setApprovalConfigs((prev) => ({
+      ...prev,
+      [itemKey]: {
+        ...current,
+        [field]: value
+      }
+    }))
+  }
+
   const handleApprove = async (req) => {
     setProcessingId(req.id)
     try {
-      await approveApprovalRequest(req.id)
+      let productConfigs = undefined
+      if (req.type === 'direct_purchase' && req.items?.length > 0) {
+        productConfigs = req.items.map((it, idx) => {
+          const cfg = getItemConfig(req.id, it, idx)
+          return {
+            productId: it.productId || `item_${idx}`,
+            sellingPrice: parseFloat(cfg.sellingPrice) || undefined,
+            minStockThreshold: parseInt(cfg.minStockThreshold, 10) || undefined,
+            costPrice: it.costPerUnit || undefined,
+            unit: cfg.unit || it.unit || 'Piece',
+          }
+        })
+      }
+
+      await approveApprovalRequest(req.id, productConfigs)
       toast.success(
         'Request Approved',
         `Stock transfer/purchase for "${req.items?.[0]?.productName || 'items'}" has been approved and applied.`
@@ -266,23 +312,96 @@ export function NotificationsPage() {
                     )}
                   </div>
 
-                  {/* Itemized Manifest List */}
-                  <div className="border border-slate-200/70 rounded-xl overflow-hidden text-xs">
-                    <div className="bg-slate-100/70 px-3 py-1.5 font-bold text-slate-600 text-[11px] flex justify-between">
-                      <span>Item Name</span>
-                      <span>Quantity & Rate</span>
+                  {/* Itemized Manifest List / Owner Pricing Configuration */}
+                  {isOwner && !isTransfer ? (
+                    <div className="space-y-2.5">
+                      <div className="text-[11px] font-bold text-amber-800 bg-amber-50/80 border border-amber-200/80 px-3 py-2 rounded-xl flex items-center gap-2">
+                        <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                        <span>Owner Review: Verify purchase price, amount, unit, and set the retail selling price & minimum stock alert.</span>
+                      </div>
+
+                      <div className="space-y-2">
+                        {req.items?.map((it, idx) => {
+                          const cfg = getItemConfig(req.id, it, idx)
+                          return (
+                            <div
+                              key={idx}
+                              className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2"
+                            >
+                              <div className="flex flex-wrap items-center justify-between gap-1 text-xs">
+                                <div>
+                                  <span className="font-extrabold text-slate-900">{it.productName}</span>
+                                  <span className="text-slate-500 font-medium ml-2">
+                                    Amount: <strong className="text-slate-800">{it.quantity} {it.unit || 'Piece'}</strong>
+                                  </span>
+                                  {it.costPerUnit !== undefined && (
+                                    <span className="text-slate-500 font-medium ml-2">
+                                      • Purchase Price: <strong className="text-slate-800">{it.costPerUnit.toLocaleString()} ETB</strong>
+                                    </span>
+                                  )}
+                                </div>
+                                <Badge variant="outline" className="text-[10px] font-bold bg-white">
+                                  {it.unit || 'Piece'}
+                                </Badge>
+                              </div>
+
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 border-t border-slate-200/60">
+                                <div>
+                                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                                    Selling Price (ETB) *
+                                  </label>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    step="any"
+                                    value={cfg.sellingPrice}
+                                    onChange={(e) =>
+                                      handleUpdateItemConfig(req.id, it, idx, 'sellingPrice', e.target.value)
+                                    }
+                                    className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-bold text-emerald-800 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
+                                    placeholder="e.g. 50"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                                    Min Stock Alert (units)
+                                  </label>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    step="1"
+                                    value={cfg.minStockThreshold}
+                                    onChange={(e) =>
+                                      handleUpdateItemConfig(req.id, it, idx, 'minStockThreshold', e.target.value)
+                                    }
+                                    className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
+                                    placeholder="e.g. 5"
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
                     </div>
-                    <div className="divide-y divide-slate-100">
-                      {req.items?.map((it, idx) => (
-                        <div key={idx} className="px-3 py-2 flex items-center justify-between">
-                          <span className="font-semibold text-slate-900">{it.productName}</span>
-                          <span className="font-extrabold text-slate-800">
-                            {it.quantity} units {it.costPerUnit ? `@ ${it.costPerUnit.toLocaleString()} ETB` : ''}
-                          </span>
-                        </div>
-                      ))}
+                  ) : (
+                    <div className="border border-slate-200/70 rounded-xl overflow-hidden text-xs">
+                      <div className="bg-slate-100/70 px-3 py-1.5 font-bold text-slate-600 text-[11px] flex justify-between">
+                        <span>Item Name</span>
+                        <span>Quantity & Rate</span>
+                      </div>
+                      <div className="divide-y divide-slate-100">
+                        {req.items?.map((it, idx) => (
+                          <div key={idx} className="px-3 py-2 flex items-center justify-between">
+                            <span className="font-semibold text-slate-900">{it.productName}</span>
+                            <span className="font-extrabold text-slate-800">
+                              {it.quantity} {it.unit || 'units'} {it.costPerUnit ? `@ ${it.costPerUnit.toLocaleString()} ETB` : ''}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                  </div>
+                  )}
 
                   {/* Action Buttons for Owner */}
                   {isOwner ? (
@@ -409,7 +528,7 @@ export function NotificationsPage() {
 
                   <div className="text-xs text-slate-600 flex flex-wrap items-center gap-2">
                     <span>
-                      Items: <strong>{req.items?.map((i) => `${i.productName} (x${i.quantity})`).join(', ')}</strong>
+                      Items: <strong>{req.items?.map((i) => `${i.productName} (${i.quantity} ${i.unit || 'units'})`).join(', ')}</strong>
                     </span>
                     <span>•</span>
                     <span>

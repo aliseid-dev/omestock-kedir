@@ -5,7 +5,7 @@ import {
   CheckCircle,
   Phone,
   Calendar,
-  DollarSign,
+  Banknote,
   Download,
   AlertCircle
 } from 'lucide-react'
@@ -101,7 +101,7 @@ export function UnpaidSalesPage() {
               <p className="text-2xl sm:text-3xl font-extrabold text-amber-950 mt-1">{formatCurrency(totalOutstanding)}</p>
             </div>
             <div className="w-12 h-12 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center font-bold text-lg">
-              <DollarSign className="w-6 h-6 text-amber-700" />
+              <Banknote className="w-6 h-6 text-amber-700" />
             </div>
           </CardContent>
         </Card>

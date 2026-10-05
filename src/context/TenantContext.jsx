@@ -4,21 +4,21 @@ import { api } from '../../convex/_generated/api'
 import { useAuth } from './AuthContext'
 
 export const SAMPLE_AUTO_PARTS = [
-  { id: 'sp-001', code: 'SP-001', name: '12 KG GAS nok', category: 'Gas Cylinders', unit: 'Kg', costPrice: 2950, sellingPrice: 3500, sellingPriceRange: '3500', minStockThreshold: 2, defaultCommissionRate: 5 },
-  { id: 'sp-002', code: 'SP-002', name: '12 KG GAS giyon', category: 'Gas Cylinders', unit: 'Kg', costPrice: 3300, sellingPrice: 3500, sellingPriceRange: '3500-3700', minStockThreshold: 2, defaultCommissionRate: 5 },
-  { id: 'sp-003', code: 'SP-003', name: '6 KG GAS', category: 'Gas Cylinders', unit: 'Kg', costPrice: 1300, sellingPrice: 1800, sellingPriceRange: '1800-2000', minStockThreshold: 2, defaultCommissionRate: 5 },
-  { id: 'sp-004', code: 'SP-004', name: '15kg Gas Cylinder', category: 'Gas Cylinders', unit: 'Kg', costPrice: 4000, sellingPrice: 4500, sellingPriceRange: '4500-5000', minStockThreshold: 2, defaultCommissionRate: 5 },
-  { id: 'sp-005', code: 'SP-005', name: '22 KG GAS', category: 'Gas Cylinders', unit: 'Kg', costPrice: 5500, sellingPrice: 6500, sellingPriceRange: '6500-7000', minStockThreshold: 1, defaultCommissionRate: 5 },
-  { id: 'sp-006', code: 'SP-006', name: '64010 Fuel filter rinken', category: 'Filters', unit: 'Piece', costPrice: 400, sellingPrice: 500, sellingPriceRange: '500-600', minStockThreshold: 5, defaultCommissionRate: 5 },
-  { id: 'sp-007', code: 'SP-007', name: 'FLANja lokal DX', category: 'Filters', unit: 'Piece', costPrice: 1800, sellingPrice: 2500, sellingPriceRange: '2500-2800', minStockThreshold: 6, defaultCommissionRate: 5 },
-  { id: 'sp-008', code: 'SP-008', name: 'ISUZU fuel filter', category: 'Filters', unit: 'Piece', costPrice: 400, sellingPrice: 600, sellingPriceRange: '600-750', minStockThreshold: 5, defaultCommissionRate: 5 },
-  { id: 'sp-009', code: 'SP-009', name: 'Coolant 1L', category: 'Coolants & Fluids', unit: 'L', costPrice: 350, sellingPrice: 500, sellingPriceRange: '500-600', minStockThreshold: 5, defaultCommissionRate: 5 },
-  { id: 'sp-010', code: 'SP-010', name: 'Coolant 4L', category: 'Coolants & Fluids', unit: 'L', costPrice: 1100, sellingPrice: 1200, sellingPriceRange: '1200-1800', minStockThreshold: 5, defaultCommissionRate: 5 },
-  { id: 'sp-011', code: 'SP-011', name: 'OSCAR BREAK FLUD', category: 'Brake Fluids', unit: 'Piece', costPrice: 150, sellingPrice: 300, sellingPriceRange: '300-400', minStockThreshold: 5, defaultCommissionRate: 5 },
-  { id: 'sp-012', code: 'SP-012', name: 'Asmico break fluid 1/2', category: 'Brake Fluids', unit: 'Piece', costPrice: 450, sellingPrice: 500, sellingPriceRange: '500-700', minStockThreshold: 5, defaultCommissionRate: 5 },
-  { id: 'sp-016', code: 'SP-016', name: 'SDK 30002 oil filter', category: 'Oil Filters', unit: 'Piece', costPrice: 350, sellingPrice: 500, sellingPriceRange: '500-650', minStockThreshold: 5, defaultCommissionRate: 5 },
-  { id: 'sp-030', code: 'SP-030', name: 'Rubia 1L', category: 'Engine Oils (1L)', unit: 'L', costPrice: 1100, sellingPrice: 1200, sellingPriceRange: '1200-1500', minStockThreshold: 5, defaultCommissionRate: 5 },
-  { id: 'sp-035', code: 'SP-035', name: 'Delo 4L', category: 'Engine Oils (4L)', unit: 'L', costPrice: 5000, sellingPrice: 5500, sellingPriceRange: '5500-6000', minStockThreshold: 3, defaultCommissionRate: 5 },
+  { id: 'sp-001', code: 'SP-001', name: '12 KG GAS nok', category: 'Gas Cylinders', unit: 'Kg', costPrice: 2950, sellingPrice: 3500, sellingPriceRange: '3500', minStockThreshold: 2, defaultCommissionRate: 2.5 },
+  { id: 'sp-002', code: 'SP-002', name: '12 KG GAS giyon', category: 'Gas Cylinders', unit: 'Kg', costPrice: 3300, sellingPrice: 3500, sellingPriceRange: '3500-3700', minStockThreshold: 2, defaultCommissionRate: 2.5 },
+  { id: 'sp-003', code: 'SP-003', name: '6 KG GAS', category: 'Gas Cylinders', unit: 'Kg', costPrice: 1300, sellingPrice: 1800, sellingPriceRange: '1800-2000', minStockThreshold: 2, defaultCommissionRate: 2.5 },
+  { id: 'sp-004', code: 'SP-004', name: '15kg Gas Cylinder', category: 'Gas Cylinders', unit: 'Kg', costPrice: 4000, sellingPrice: 4500, sellingPriceRange: '4500-5000', minStockThreshold: 2, defaultCommissionRate: 2.5 },
+  { id: 'sp-005', code: 'SP-005', name: '22 KG GAS', category: 'Gas Cylinders', unit: 'Kg', costPrice: 5500, sellingPrice: 6500, sellingPriceRange: '6500-7000', minStockThreshold: 1, defaultCommissionRate: 2.5 },
+  { id: 'sp-006', code: 'SP-006', name: '64010 Fuel filter rinken', category: 'Filters', unit: 'Piece', costPrice: 400, sellingPrice: 500, sellingPriceRange: '500-600', minStockThreshold: 5, defaultCommissionRate: 2.5 },
+  { id: 'sp-007', code: 'SP-007', name: 'FLANja lokal DX', category: 'Filters', unit: 'Piece', costPrice: 1800, sellingPrice: 2500, sellingPriceRange: '2500-2800', minStockThreshold: 6, defaultCommissionRate: 2.5 },
+  { id: 'sp-008', code: 'SP-008', name: 'ISUZU fuel filter', category: 'Filters', unit: 'Piece', costPrice: 400, sellingPrice: 600, sellingPriceRange: '600-750', minStockThreshold: 5, defaultCommissionRate: 2.5 },
+  { id: 'sp-009', code: 'SP-009', name: 'Coolant 1L', category: 'Coolants & Fluids', unit: 'L', costPrice: 350, sellingPrice: 500, sellingPriceRange: '500-600', minStockThreshold: 5, defaultCommissionRate: 2.5 },
+  { id: 'sp-010', code: 'SP-010', name: 'Coolant 4L', category: 'Coolants & Fluids', unit: 'L', costPrice: 1100, sellingPrice: 1200, sellingPriceRange: '1200-1800', minStockThreshold: 5, defaultCommissionRate: 2.5 },
+  { id: 'sp-011', code: 'SP-011', name: 'OSCAR BREAK FLUD', category: 'Brake Fluids', unit: 'Piece', costPrice: 150, sellingPrice: 300, sellingPriceRange: '300-400', minStockThreshold: 5, defaultCommissionRate: 2.5 },
+  { id: 'sp-012', code: 'SP-012', name: 'Asmico break fluid 1/2', category: 'Brake Fluids', unit: 'Piece', costPrice: 450, sellingPrice: 500, sellingPriceRange: '500-700', minStockThreshold: 5, defaultCommissionRate: 2.5 },
+  { id: 'sp-016', code: 'SP-016', name: 'SDK 30002 oil filter', category: 'Oil Filters', unit: 'Piece', costPrice: 350, sellingPrice: 500, sellingPriceRange: '500-650', minStockThreshold: 5, defaultCommissionRate: 0.5 },
+  { id: 'sp-030', code: 'SP-030', name: 'Rubia 1L', category: 'Engine Oils (1L)', unit: 'L', costPrice: 1100, sellingPrice: 1200, sellingPriceRange: '1200-1500', minStockThreshold: 5, defaultCommissionRate: 0.5 },
+  { id: 'sp-035', code: 'SP-035', name: 'Delo 4L', category: 'Engine Oils (4L)', unit: 'L', costPrice: 5000, sellingPrice: 5500, sellingPriceRange: '5500-6000', minStockThreshold: 3, defaultCommissionRate: 0.5 },
 ]
 
 export const SAMPLE_WH_STOCK = {
@@ -113,6 +113,7 @@ export function TenantProvider({ children }) {
   const deleteStoreMutation = useMutation(api.inventory.deleteStore)
   const seedSampleInventoryMutation = useMutation(api.inventory.seedSampleInventory)
   const normalizeLocationNamesMutation = useMutation(api.inventory.normalizeLocationNames)
+  const bulkImportInventoryMutation = useMutation(api.inventory.bulkImportInventory)
   const clearOrganizationDataMutation = useMutation(api.users.clearOrganizationData)
   const wipeClientAndResetMutation = useMutation(api.users.wipeClientAndReset)
   const wipeEntireDatabaseMutation = useMutation(api.users.wipeEntireDatabase)
@@ -299,7 +300,10 @@ export function TenantProvider({ children }) {
         minSellingPrice: productData.minSellingPrice !== undefined ? parseFloat(productData.minSellingPrice) : undefined,
         maxSellingPrice: productData.maxSellingPrice !== undefined ? parseFloat(productData.maxSellingPrice) : undefined,
         costPrice: parseFloat(productData.costPrice) || 0,
-        defaultCommissionRate: parseFloat(productData.defaultCommissionRate) || 5,
+        defaultCommissionRate:
+          productData.defaultCommissionRate !== undefined && productData.defaultCommissionRate !== ''
+            ? parseFloat(productData.defaultCommissionRate)
+            : ((productData.name + ' ' + (productData.category || '')).toLowerCase().includes('oil') ? 0.5 : 2.5),
         minStockThreshold: parseInt(productData.minStockThreshold, 10) || 5,
         notes: productData.notes?.trim() || undefined,
         initialWarehouseId: productData.initialWarehouseId || undefined,
@@ -310,7 +314,7 @@ export function TenantProvider({ children }) {
         await logAuditAction({
           action: 'PRODUCT_CREATED',
           description: `Created catalog product "${productData.name}"${productData.initialQuantity ? ` with ${productData.initialQuantity} units` : ''}`,
-          target: res._id,
+          target: productData.name,
         })
       }
       return res ? { ...res, id: res._id } : null
@@ -339,10 +343,11 @@ export function TenantProvider({ children }) {
           updates.minStockThreshold !== undefined ? parseInt(updates.minStockThreshold, 10) : undefined,
         notes: updates.notes,
       })
+      const prodName = updates.name || products.find(p => p.id === productId)?.name || 'Product'
       await logAuditAction({
         action: 'PRODUCT_UPDATED',
-        description: `Updated product properties`,
-        target: productId,
+        description: `Updated properties for "${prodName}"`,
+        target: prodName,
       })
       return true
     } catch (err) {
@@ -368,11 +373,12 @@ export function TenantProvider({ children }) {
 
   const deleteProduct = async (productId) => {
     try {
+      const prodName = products.find(p => p.id === productId)?.name || 'Product'
       await deleteProductMutation({ productId })
       await logAuditAction({
         action: 'PRODUCT_DELETED',
-        description: `Deleted catalog product`,
-        target: productId,
+        description: `Deleted catalog product "${prodName}"`,
+        target: prodName,
       })
       return true
     } catch (err) {
@@ -407,10 +413,12 @@ export function TenantProvider({ children }) {
       })
 
       const totalUnits = transferItems.reduce((acc, it) => acc + it.quantity, 0)
+      const fromName = warehouses.find(w => w.id === fromWarehouseId)?.name || stores.find(s => s.id === fromStoreId)?.name || 'Origin'
+      const toName = warehouses.find(w => w.id === toWarehouseId)?.name || stores.find(s => s.id === toStoreId)?.name || 'Destination'
       await logAuditAction({
         action: 'STOCK_TRANSFER',
-        description: `Transferred ${totalUnits} units across ${transferItems.length} product(s)`,
-        target: `${fromWarehouseId || fromStoreId} -> ${toWarehouseId || toStoreId}`,
+        description: `Transferred ${totalUnits} units across ${transferItems.length} product(s) from ${fromName} to ${toName}`,
+        target: `${fromName} → ${toName}`,
       })
       return true
     } catch (err) {
@@ -462,10 +470,11 @@ export function TenantProvider({ children }) {
       })
 
       const totalUnits = inboundItems.reduce((acc, it) => acc + it.quantity, 0)
+      const whName = warehouses.find(w => w.id === warehouseId)?.name || 'Warehouse'
       await logAuditAction({
         action: 'WAREHOUSE_INBOUND',
         description: `Warehouse direct purchase: ${totalUnits} units (via ${paymentMethod || 'Cash'}${supplierName ? `, Supplier: ${supplierName}` : ''})`,
-        target: warehouseId,
+        target: whName,
       })
       return true
     } catch (err) {
@@ -516,10 +525,11 @@ export function TenantProvider({ children }) {
       })
 
       const totalUnits = purchaseItems.reduce((acc, it) => acc + it.quantity, 0)
+      const storeName = stores.find(s => s.id === storeId)?.name || 'Store'
       await logAuditAction({
         action: 'DIRECT_STORE_PURCHASE',
         description: `Direct store purchase: ${totalUnits} units (via ${paymentMethod || 'Cash'}${supplierName ? `, Supplier: ${supplierName}` : ''})`,
-        target: storeId,
+        target: storeName,
       })
       return true
     } catch (err) {
@@ -636,6 +646,9 @@ export function TenantProvider({ children }) {
           productCode: prod?.code || '',
           quantity: parseInt(it.quantity, 10) || 1,
           costPerUnit: cost,
+          unit: it.unit || prod?.unit || 'Piece',
+          sellingPrice: it.sellingPrice !== undefined && it.sellingPrice !== '' ? parseFloat(it.sellingPrice) : prod?.sellingPrice,
+          minStockThreshold: it.minStockThreshold !== undefined && it.minStockThreshold !== '' ? parseInt(it.minStockThreshold, 10) : prod?.minStockThreshold,
         }
       })
 
@@ -674,7 +687,7 @@ export function TenantProvider({ children }) {
       const itemsSummary = formattedItems
         .map(
           (it) =>
-            `• <b>${it.productName}</b>: <code>${it.quantity}</code> units @ ${(it.costPerUnit || 0).toLocaleString()} ETB`
+            `• <b>${it.productName}</b>: <code>${it.quantity}</code> ${it.unit || 'units'} @ ${(it.costPerUnit || 0).toLocaleString()} ETB`
         )
         .join('\n')
 
@@ -704,12 +717,13 @@ export function TenantProvider({ children }) {
     }
   }
 
-  const approveApprovalRequest = async (requestId) => {
+  const approveApprovalRequest = async (requestId, productConfigs) => {
     try {
       const res = await approveRequestMutation({
         requestId,
         reviewerUserId: currentUser?.id || 'owner',
         reviewerUserName: currentUser?.name || currentUser?.email || 'Owner',
+        productConfigs: productConfigs || undefined,
       })
       return res
     } catch (err) {
@@ -770,10 +784,16 @@ export function TenantProvider({ children }) {
       const created = await recordSaleMutation(saleMutationArgs)
 
       if (created) {
+        const itemsSummary = items
+          .map((it) => `${it.quantity}x ${it.productName || 'Product'}`)
+          .join(', ')
+        const storeObj = stores.find(s => s.id === saleData.storeId)
+        const locName = saleData.storeName || storeObj?.name || 'Store 1'
+
         await logAuditAction({
           action: 'SALE_RECORDED',
-          description: `Recorded ${saleData.paymentMethod} sale ${created.receiptNumber} (ETB ${saleData.totalAmount.toFixed(2)})`,
-          target: saleData.storeId,
+          description: `Sold ${itemsSummary} via ${saleData.paymentMethod}${saleData.bankProvider ? ` (${saleData.bankProvider})` : ''} at ${locName} (${created.receiptNumber} • ${formatCurrency(saleData.totalAmount)})`,
+          target: locName,
         })
       }
 
@@ -800,10 +820,11 @@ export function TenantProvider({ children }) {
         settledBankProvider: bankProvider || undefined,
       })
 
+      const matchedSale = sales.find(s => s.id === saleId)
       await logAuditAction({
         action: 'CREDIT_SALE_SETTLED',
-        description: `Settled unpaid credit sale via ${settledPaymentMethod}`,
-        target: saleId,
+        description: `Settled unpaid credit sale ${matchedSale?.invoiceNumber ? `(${matchedSale.invoiceNumber})` : ''} for ${matchedSale?.customerName || 'Customer'} via ${settledPaymentMethod}${bankProvider ? ` (${bankProvider})` : ''}`,
+        target: matchedSale?.invoiceNumber || matchedSale?.customerName || 'Credit Sale',
       })
       return true
     } catch (err) {
@@ -817,10 +838,11 @@ export function TenantProvider({ children }) {
   const approveStaffMember = async (staffId) => {
     try {
       await approveStaffMutation({ staffId })
+      const matchedStaff = staff.find(s => s.id === staffId)
       await logAuditAction({
         action: 'STAFF_UPDATED',
-        description: `Approved salesperson access`,
-        target: staffId,
+        description: `Approved salesperson access for ${matchedStaff?.name || 'Staff Member'}`,
+        target: matchedStaff?.name || 'Staff Member',
       })
       return true
     } catch (err) {
@@ -832,10 +854,11 @@ export function TenantProvider({ children }) {
   const rejectStaffMember = async (staffId) => {
     try {
       await rejectStaffMutation({ staffId })
+      const matchedStaff = staff.find(s => s.id === staffId)
       await logAuditAction({
         action: 'STAFF_UPDATED',
-        description: `Rejected salesperson application`,
-        target: staffId,
+        description: `Rejected salesperson application for ${matchedStaff?.name || 'Staff Member'}`,
+        target: matchedStaff?.name || 'Staff Member',
       })
       return true
     } catch (err) {
@@ -847,10 +870,11 @@ export function TenantProvider({ children }) {
   const deleteStaffMember = async (staffId) => {
     try {
       await deleteStaffMutation({ staffId })
+      const matchedStaff = staff.find(s => s.id === staffId)
       await logAuditAction({
         action: 'STAFF_UPDATED',
-        description: `Removed staff member`,
-        target: staffId,
+        description: `Removed staff member ${matchedStaff?.name || 'Staff Member'}`,
+        target: matchedStaff?.name || 'Staff Member',
       })
       return true
     } catch (err) {
@@ -880,7 +904,7 @@ export function TenantProvider({ children }) {
       await logAuditAction({
         action: 'BUSINESS_NAME_UPDATED',
         description: `Updated business name to "${newName.trim()}"`,
-        target: clientId,
+        target: newName.trim(),
       })
     } catch (err) {
       console.error('updateBusinessName failed:', err)
@@ -898,7 +922,7 @@ export function TenantProvider({ children }) {
       await logAuditAction({
         action: 'STOCK_OVERRIDE',
         description: `Overrode stock for "${productName}" to ${newQuantity} in ${locationName}`,
-        target: locationId,
+        target: locationName,
       })
       return true
     } catch (err) {
@@ -918,7 +942,7 @@ export function TenantProvider({ children }) {
       await logAuditAction({
         action: 'STORE_CREATED',
         description: `Created new retail store branch "${name.trim()}"`,
-        target: res,
+        target: name.trim(),
       })
       return res
     } catch (err) {
@@ -929,11 +953,12 @@ export function TenantProvider({ children }) {
 
   const deleteStore = async (storeId) => {
     try {
+      const stName = stores.find(s => s.id === storeId)?.name || 'Store Branch'
       await deleteStoreMutation({ storeId })
       await logAuditAction({
         action: 'STORE_DELETED',
-        description: `Deleted retail store branch`,
-        target: storeId,
+        description: `Deleted retail store branch "${stName}"`,
+        target: stName,
       })
       return true
     } catch (err) {
@@ -942,11 +967,27 @@ export function TenantProvider({ children }) {
     }
   }
 
+  // Bulk import products and stock allocations from Excel
+  const bulkImportInventory = async (items, clearExisting = false) => {
+    if (!clientId) return null
+    try {
+      const res = await bulkImportInventoryMutation({
+        clientId,
+        items,
+        clearExisting,
+      })
+      return res
+    } catch (err) {
+      console.error('bulkImportInventory failed:', err)
+      throw err
+    }
+  }
+
   // Clear products, sales, and reset inventory stock to {} for the active client
   const clearDatabaseData = async () => {
-    if (!activeClientId) return false
+    if (!clientId) return false
     try {
-      await clearOrganizationDataMutation({ clientId: activeClientId })
+      await clearOrganizationDataMutation({ clientId })
       return true
     } catch (err) {
       console.error('clearDatabaseData failed:', err)
@@ -956,9 +997,9 @@ export function TenantProvider({ children }) {
 
   // Wipe client organization and all associated data, returning user to initial onboarding
   const wipeAndResetAccount = async () => {
-    if (!activeClientId) return false
+    if (!clientId) return false
     try {
-      await wipeClientAndResetMutation({ clientId: activeClientId })
+      await wipeClientAndResetMutation({ clientId })
       return true
     } catch (err) {
       console.error('wipeAndResetAccount failed:', err)
@@ -1012,6 +1053,7 @@ export function TenantProvider({ children }) {
         updateProduct,
         deleteProduct,
         seedSampleInventory,
+        bulkImportInventory,
         transferStock,
         recordWarehouseInbound,
         recordDirectPurchase,
