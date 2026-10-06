@@ -418,7 +418,7 @@ export function MainLayout() {
       <div className="flex-1 flex flex-col min-w-0 lg:pl-64 xl:pl-72">
         
         {/* Mobile Top Header (Visible on mobile only) */}
-        <header className="lg:hidden sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-slate-200">
+        <header className="lg:hidden sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-slate-200 safe-top">
           <div className="px-3.5 h-14 flex items-center justify-between gap-2.5">
             <Link to={isOwner ? '/' : '/pos'} className="flex items-center gap-2.5 min-w-0 flex-1 group" title="OMESTOCK">
               <div className="w-8 h-8 rounded-lg bg-black text-white flex items-center justify-center font-black text-base shadow-xs shrink-0 group-active:scale-95 transition-transform">
@@ -669,7 +669,7 @@ export function MainLayout() {
       </div>
 
       {/* ─── Mobile Bottom Navigation Bar (Hidden on lg+ screens) ─── */}
-      <nav className="lg:hidden fixed bottom-0 inset-x-0 bg-white/95 backdrop-blur-md border-t border-slate-200 z-40 px-2 py-1.5 flex items-center justify-around shadow-lg">
+      <nav className="lg:hidden fixed bottom-0 inset-x-0 bg-white/95 backdrop-blur-md border-t border-slate-200 z-40 px-2 py-1.5 safe-bottom flex items-center justify-around shadow-lg">
         
         {/* 1. POS */}
         <NavLink

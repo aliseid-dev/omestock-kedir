@@ -14,6 +14,25 @@
   }
 }
 
+/* ─── iOS / Mobile Safe Area Utilities ─── */
+.safe-top {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Standalone PWA Mode (Add to Home Screen on iOS / Android) */
+@media all and (display-mode: standalone) {
+  .safe-top {
+    padding-top: max(env(safe-area-inset-top, 0px), 44px);
+  }
+  .safe-bottom {
+    padding-bottom: max(env(safe-area-inset-bottom, 0px), 16px);
+  }
+}
+
 /* Custom subtle scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
