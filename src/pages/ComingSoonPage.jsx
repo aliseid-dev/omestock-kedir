@@ -55,7 +55,7 @@ export function ComingSoonPage({ title, description }) {
 
           <p className="text-slate-600 max-w-md text-base leading-relaxed mb-8">
             {description ||
-              'We are currently focusing all power on core Sales Recording, Point of Sale, and Stock Management. This module is undergoing fine-tuning and will be available soon.'}
+              'This module is undergoing fine-tuning and will be available soon.'}
           </p>
 
           {/* Quick Access to Active Core Features */}
@@ -75,7 +75,7 @@ export function ComingSoonPage({ title, description }) {
               <Link to="/inventory" className="w-full">
                 <Button variant="outline" className="w-full flex items-center justify-center gap-2 py-3 text-slate-700 hover:text-blue-600 hover:border-blue-300">
                   <Boxes className="w-4 h-4 text-emerald-600" />
-                  <span className="font-medium text-sm">Stock & Warehouses</span>
+                  <span className="font-medium text-sm">Stock</span>
                 </Button>
               </Link>
 

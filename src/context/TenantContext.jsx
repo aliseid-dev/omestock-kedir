@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useMemo, useEffect } from '
 import { useQuery, useMutation, useAction } from 'convex/react'
 import { api } from '../../convex/_generated/api'
 import { useAuth } from './AuthContext'
+import { formatCurrency } from '../lib/utils'
 
 export const SAMPLE_AUTO_PARTS = [
   { id: 'sp-001', code: 'SP-001', name: '12 KG GAS nok', category: 'Gas Cylinders', unit: 'Kg', costPrice: 2950, sellingPrice: 3500, sellingPriceRange: '3500', minStockThreshold: 2, defaultCommissionRate: 2.5 },
@@ -125,6 +126,14 @@ export function TenantProvider({ children }) {
   const rejectRequestMutation = useMutation(api.approvals.rejectRequest)
   const dispatchTelegramApprovalAction = useAction(api.telegram.dispatchTelegramApproval)
   const updateTelegramApprovalMessageAction = useAction(api.telegram.updateTelegramApprovalMessage)
+  const ensureTelegramWebhookAction = useAction(api.telegram.ensureTelegramWebhook)
+  const getTelegramBotInfoAction = useAction(api.telegram.getTelegramBotInfo)
+  const telegramSubscribersData = useQuery(api.approvals.getActiveTelegramSubscribers)
+
+  // Auto-ensure Telegram Webhook is active for real-time approvals
+  useEffect(() => {
+    ensureTelegramWebhookAction({}).catch(() => {})
+  }, [ensureTelegramWebhookAction])
 
   // Auto-normalize location names (e.g. Central Distribution Hub -> Warehouse, Retail Store #1 -> Store 1)
   useEffect(() => {
@@ -1083,6 +1092,10 @@ export function TenantProvider({ children }) {
         switchUser,
         verifyPasscode,
         lockSession,
+        // Telegram Bot Real-time Sync
+        telegramSubscribers: telegramSubscribersData || [],
+        ensureTelegramWebhook: () => ensureTelegramWebhookAction({}),
+        getTelegramBotInfo: () => getTelegramBotInfoAction({}),
         // Compatibility stubs
         selectOrganization: () => {},
         clearActiveOrganization: () => {},

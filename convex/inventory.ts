@@ -731,3 +731,12 @@ export const bulkImportInventory = mutation({
   },
 });
 
+// Auto-detect the latest or active client for scripts and utilities
+export const getActiveClient = query({
+  args: {},
+  handler: async (ctx) => {
+    return await ctx.db.query("clients").order("desc").first();
+  },
+});
+
+

@@ -15,6 +15,9 @@ export default defineConfig({
     port: 3000,
     open: false,
     allowedHosts: true,
+    hmr: {
+      clientPort: 3000,
+    },
   },
   preview: {
     host: true,

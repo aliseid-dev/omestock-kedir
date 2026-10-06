@@ -619,46 +619,44 @@ export function PosPage() {
     <div className="space-y-4 sm:space-y-6 pb-28 sm:pb-8 animate-in fade-in duration-200">
       
       {/* POS Top Header: Inline Title + Location Selector (Store or Warehouse) */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="flex items-center gap-2.5 flex-wrap sm:flex-nowrap">
-          <h1 className="text-xl sm:text-2xl font-black tracking-tight text-slate-900 flex items-center gap-2 shrink-0">
-            <ShoppingCart className="w-5 h-5 sm:w-6 sm:h-6 text-emerald-600" />
-            <span>POS</span>
-          </h1>
+      <div className="flex items-center justify-between gap-2.5 w-full">
+        <h1 className="text-xl sm:text-2xl font-black tracking-tight text-slate-900 flex items-center gap-2 shrink-0">
+          <ShoppingCart className="w-5 h-5 sm:w-6 sm:h-6 text-emerald-600" />
+          <span>POS</span>
+        </h1>
 
-          {/* Location Selector placed directly to the right of POS text */}
-          {!isOwner ? (
-            <div className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 rounded-xl border border-slate-200 text-xs font-bold text-slate-800">
-              <Lock className="w-3.5 h-3.5 text-slate-500 shrink-0" />
-              <span>Assigned Store: <span className="text-emerald-700">{activeLocation?.name}</span></span>
-            </div>
-          ) : (
-            <div className="relative min-w-[200px] sm:min-w-[260px]">
-              <select
-                value={selectedLocationKey}
-                onChange={(e) => setSelectedLocationKey(e.target.value)}
-                className="w-full text-xs font-bold bg-white border-2 border-emerald-500 rounded-xl px-3 py-2 text-slate-900 shadow-2xs focus:ring-2 focus:ring-emerald-500 focus:outline-none cursor-pointer"
-              >
-                <optgroup label="Retail Stores">
-                  {stores.map(store => (
-                    <option key={`store:${store.id}`} value={`store:${store.id}`}>
-                      {store.name}
-                    </option>
-                  ))}
-                </optgroup>
-                <optgroup label="Warehouses (Direct Sale)">
-                  {warehouses.map(wh => (
-                    <option key={`warehouse:${wh.id}`} value={`warehouse:${wh.id}`}>
-                      {wh.name.toLowerCase().includes('warehouse') ? wh.name : `${wh.name} (Warehouse)`}
-                    </option>
-                  ))}
-                </optgroup>
-              </select>
-            </div>
-          )}
-        </div>
-
-        
+        {/* Location Selector moved all the way to the right */}
+        {!isOwner ? (
+          <div className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-100 rounded-xl border border-slate-200 text-xs font-bold text-slate-800 ml-auto shrink-0">
+            <Lock className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+            <span className="truncate max-w-[130px] sm:max-w-none">
+              Store: <span className="text-emerald-700">{activeLocation?.name}</span>
+            </span>
+          </div>
+        ) : (
+          <div className="relative w-auto min-w-[140px] max-w-[200px] sm:min-w-[240px] sm:max-w-[280px] ml-auto">
+            <select
+              value={selectedLocationKey}
+              onChange={(e) => setSelectedLocationKey(e.target.value)}
+              className="w-full text-xs font-bold bg-white border-2 border-emerald-500 rounded-xl px-2.5 py-1.5 sm:px-3 sm:py-2 text-slate-900 shadow-2xs focus:ring-2 focus:ring-emerald-500 focus:outline-none cursor-pointer truncate"
+            >
+              <optgroup label="Retail Stores">
+                {stores.map(store => (
+                  <option key={`store:${store.id}`} value={`store:${store.id}`}>
+                    {store.name}
+                  </option>
+                ))}
+              </optgroup>
+              <optgroup label="Warehouses (Direct Sale)">
+                {warehouses.map(wh => (
+                  <option key={`warehouse:${wh.id}`} value={`warehouse:${wh.id}`}>
+                    {wh.name.toLowerCase().includes('warehouse') ? wh.name : `${wh.name} (Warehouse)`}
+                  </option>
+                ))}
+              </optgroup>
+            </select>
+          </div>
+        )}
       </div>
 
       {/* Sale Success Notification */}
@@ -803,15 +801,22 @@ export function PosPage() {
             /* TABLE DESIGN: Clean, Compact POS Table with Instant +/- Stepper    */
             /* ══════════════════════════════════════════════════════════════════ */
             <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse">
+              <div className="w-full overflow-x-auto">
+                <table className="w-full table-fixed text-left border-collapse">
+                  <colgroup>
+                    <col className="w-auto" />
+                    <col className="hidden md:table-column md:w-[120px]" />
+                    <col className="w-[48px] sm:w-[64px]" />
+                    <col className="w-[72px] sm:w-[100px]" />
+                    <col className="w-[74px] sm:w-[86px]" />
+                  </colgroup>
                   <thead>
                     <tr className="bg-slate-50/90 border-b border-slate-200 text-[11px] font-black text-slate-500 uppercase tracking-wider">
                       <th className="py-2.5 pl-3 pr-1 sm:px-4">Item</th>
                       <th className="py-2.5 px-3 hidden md:table-cell">Category</th>
-                      <th className="py-2.5 px-1 sm:px-2 text-center whitespace-nowrap">Stock</th>
-                      <th className="py-2.5 px-1.5 sm:px-3 whitespace-nowrap">Price</th>
-                      <th className="py-2.5 pl-1 pr-3 text-right whitespace-nowrap w-[70px] sm:w-[90px]">
+                      <th className="py-2.5 px-1 sm:px-2 text-center">Stock</th>
+                      <th className="py-2.5 px-1 sm:px-2 text-right sm:text-left">Price</th>
+                      <th className="py-2.5 px-1 sm:px-2 text-center">
                         <span className="hidden sm:inline">Action</span>
                         <span className="sm:hidden">Add</span>
                       </th>
@@ -836,30 +841,28 @@ export function PosPage() {
                               : 'hover:bg-slate-50/80 cursor-pointer'
                           }`}
                         >
-                          {/* Item Name, Code & Unit */}
-                          <td className="py-2 pl-3 pr-1 sm:px-4 align-middle">
-                            <div className="flex flex-col">
-                              <div className="flex items-center gap-1.5 flex-wrap">
-                                <span className="font-bold text-slate-900 text-xs sm:text-sm leading-tight">
-                                  {product.name}
-                                </span>
-                              </div>
-                              <div className="flex items-center gap-1.5 text-[10px] text-slate-400 mt-0.5 truncate">
-                                <span className="font-medium text-slate-500">{product.unit || 'Pc'}</span>
+                          {/* Item Name, Code & Unit - wraps cleanly across lines */}
+                          <td className="py-2.5 pl-3 pr-1 sm:px-4 align-middle">
+                            <div className="flex flex-col min-w-0">
+                              <span className="font-bold text-slate-900 text-xs sm:text-sm leading-snug break-words hyphens-auto [overflow-wrap:anywhere]">
+                                {product.name}
+                              </span>
+                              <div className="flex items-center gap-1.5 text-[10px] text-slate-400 mt-0.5 flex-wrap leading-tight">
+                                <span className="font-medium text-slate-500 shrink-0">{product.unit || 'Pc'}</span>
                                 {product.category && (
                                   <>
-                                    <span>&bull;</span>
-                                    <span className="truncate max-w-[120px]">{product.category}</span>
+                                    <span className="shrink-0">&bull;</span>
+                                    <span className="break-words line-clamp-1">{product.category}</span>
                                   </>
                                 )}
-                                <span className="hidden sm:inline">&bull; Comm: {getProductCommissionRate(product)}%</span>
+                                <span className="hidden sm:inline shrink-0">&bull; Comm: {getProductCommissionRate(product)}%</span>
                               </div>
                             </div>
                           </td>
 
                           {/* Category (Hidden on mobile) */}
-                          <td className="py-2 px-3 hidden md:table-cell align-middle">
-                            <span className="inline-block px-2 py-0.5 rounded-lg bg-slate-100 text-slate-600 text-xs font-semibold">
+                          <td className="py-2.5 px-3 hidden md:table-cell align-middle">
+                            <span className="inline-block px-2 py-0.5 rounded-lg bg-slate-100 text-slate-600 text-xs font-semibold break-words">
                               {product.category || 'General'}
                             </span>
                             <span className="block text-[10px] text-slate-400 mt-0.5">
@@ -868,9 +871,9 @@ export function PosPage() {
                           </td>
 
                           {/* Stock & Quick Eye Button */}
-                          <td className="py-2 px-1 sm:px-2 text-center align-middle whitespace-nowrap">
-                            <div className="inline-flex flex-col items-center">
-                              <div className="flex items-center justify-center gap-1">
+                          <td className="py-2.5 px-0.5 sm:px-1.5 text-center align-middle">
+                            <div className="inline-flex flex-col items-center justify-center">
+                              <div className="flex items-center justify-center gap-0.5">
                                 <span className={`font-black text-xs sm:text-sm ${isOut ? 'text-rose-600' : isLow ? 'text-amber-600' : 'text-slate-900'}`}>
                                   {stockAtStore}
                                 </span>
@@ -878,7 +881,7 @@ export function PosPage() {
                                   type="button"
                                   onClick={(e) => handleInspectStock(e, product)}
                                   title="Check branches stock"
-                                  className="p-1 rounded text-slate-300 hover:text-emerald-700 hover:bg-slate-100 transition-colors cursor-pointer"
+                                  className="p-0.5 rounded text-slate-300 hover:text-emerald-700 hover:bg-slate-100 transition-colors cursor-pointer"
                                 >
                                   <Eye className="w-3.5 h-3.5" />
                                 </button>
@@ -890,35 +893,35 @@ export function PosPage() {
                           </td>
 
                           {/* Price & Variable Indicator */}
-                          <td className="py-2 px-1.5 sm:px-3 align-middle whitespace-nowrap">
-                            <div className="flex flex-col">
+                          <td className="py-2.5 px-1 sm:px-2 text-right sm:text-left align-middle">
+                            <div className="flex flex-col items-end sm:items-start leading-tight">
                               {product.sellingPriceRange ? (
                                 <>
-                                  <span className="font-black text-emerald-700 text-xs sm:text-sm leading-tight">
-                                    {product.sellingPriceRange} <span className="text-[10px] font-bold text-slate-400">ETB</span>
+                                  <span className="font-black text-emerald-700 text-xs sm:text-sm leading-tight break-words">
+                                    {product.sellingPriceRange} <span className="text-[9px] font-bold text-slate-400">ETB</span>
                                   </span>
-                                  <span className="text-[9px] font-bold text-amber-700 bg-amber-50 px-1 py-0.2 rounded border border-amber-200 w-fit mt-0.5">
+                                  <span className="text-[8px] font-bold text-amber-700 bg-amber-50 px-1 py-0.2 rounded border border-amber-200 mt-0.5">
                                     Variable
                                   </span>
                                 </>
                               ) : (
-                                <span className="font-black text-emerald-600 text-xs sm:text-sm leading-tight">
+                                <span className="font-black text-emerald-600 text-xs sm:text-sm leading-tight break-words">
                                   {formatCurrency(product.sellingPrice)}
                                 </span>
                               )}
                             </div>
                           </td>
 
-                          {/* Action / Compact + Button & Stepper */}
-                          <td className="py-2 pl-1 pr-3 text-right align-middle whitespace-nowrap">
+                          {/* Action / Always-visible + Button & Stepper */}
+                          <td className="py-2.5 px-1 sm:px-2 text-center align-middle">
                             {isOut ? (
-                              <span className="inline-block text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-1 rounded-md">
+                              <span className="inline-block text-[10px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-md">
                                 Out
                               </span>
                             ) : inCart ? (
-                              /* Interactive Stepper when in cart */
+                              /* Interactive Stepper when in cart: fits completely within column with zero clipping */
                               <div
-                                className="inline-flex items-center rounded-lg bg-emerald-50 border border-emerald-300 p-0.5 shadow-xs ml-auto"
+                                className="inline-flex items-center rounded-lg bg-emerald-50 border border-emerald-300 p-0.5 shadow-xs mx-auto shrink-0"
                                 onClick={(e) => e.stopPropagation()}
                               >
                                 <button
@@ -927,17 +930,17 @@ export function PosPage() {
                                     e.stopPropagation()
                                     handleUpdateQuantityDelta(product.id, -1)
                                   }}
-                                  className="w-6 h-6 sm:w-7 sm:h-7 rounded-md bg-white border border-emerald-200 flex items-center justify-center text-slate-700 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-300 active:scale-90 transition-all cursor-pointer"
+                                  className="w-5 h-5 sm:w-6 sm:h-6 rounded-md bg-white border border-emerald-200 flex items-center justify-center text-slate-700 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-300 active:scale-90 transition-all cursor-pointer shrink-0"
                                   title={inCart.quantity === 1 ? "Remove from cart" : "Decrease quantity"}
                                 >
                                   {inCart.quantity === 1 ? (
-                                    <Trash2 className="w-3 h-3 text-rose-500" />
+                                    <Trash2 className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-rose-500" />
                                   ) : (
-                                    <Minus className="w-3 h-3 text-slate-700" />
+                                    <Minus className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-slate-700" />
                                   )}
                                 </button>
 
-                                <span className="w-6 sm:w-7 text-center font-black text-xs text-emerald-900 select-none">
+                                <span className="w-4 sm:w-5 text-center font-black text-[11px] sm:text-xs text-emerald-900 select-none shrink-0 px-0.5">
                                   {inCart.quantity}
                                 </span>
 
@@ -948,10 +951,10 @@ export function PosPage() {
                                     handleUpdateQuantityDelta(product.id, 1)
                                   }}
                                   disabled={inCart.quantity >= stockAtStore}
-                                  className="w-6 h-6 sm:w-7 sm:h-7 rounded-md bg-emerald-600 flex items-center justify-center text-white hover:bg-emerald-700 active:scale-90 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shadow-xs"
+                                  className="w-5 h-5 sm:w-6 sm:h-6 rounded-md bg-emerald-600 flex items-center justify-center text-white hover:bg-emerald-700 active:scale-90 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shadow-xs shrink-0"
                                   title="Increase quantity"
                                 >
-                                  <Plus className="w-3 h-3 text-white" />
+                                  <Plus className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-white" />
                                 </button>
                               </div>
                             ) : (
@@ -961,7 +964,7 @@ export function PosPage() {
                                   e.stopPropagation()
                                   handleAddToCart(product)
                                 }}
-                                className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-black hover:bg-emerald-600 text-white flex items-center justify-center transition-all active:scale-90 cursor-pointer shadow-xs ml-auto"
+                                className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-black hover:bg-emerald-600 text-white flex items-center justify-center transition-all active:scale-90 cursor-pointer shadow-xs mx-auto shrink-0"
                                 title="Add to cart"
                               >
                                 <Plus className="w-4 h-4" />

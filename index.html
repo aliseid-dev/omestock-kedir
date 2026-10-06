@@ -2,13 +2,78 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📊</text></svg>" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="alternate icon" type="image/x-icon" href="/favicon.ico" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" sizes="180x180" />
+    <link rel="apple-touch-icon-precomposed" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/manifest.json" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-    <meta name="theme-color" content="#ffffff" />
+    <meta name="theme-color" content="#000000" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="OMESTOCK" />
+    <meta name="application-name" content="OMESTOCK" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>OMESTOCK</title>
+    <script>
+      // Polyfill crypto.subtle for non-secure context (e.g. testing over LAN IP HTTP like 192.168.x.x:3000)
+      if (typeof window !== 'undefined' && window.crypto && !window.crypto.subtle) {
+        function sha256(ascii) {
+          function rightRotate(value, amount) { return (value >>> amount) | (value << (32 - amount)); }
+          var mathPow = Math.pow, maxWord = mathPow(2, 32), lengthProperty = 'length', i, j, words = [];
+          var asciiBitLength = ascii[lengthProperty] * 8;
+          var hash = sha256.h = sha256.h || [], k = sha256.k = sha256.k || [];
+          var primeCounter = k[lengthProperty], isComposite = {};
+          for (var candidate = 2; primeCounter < 64; candidate++) {
+            if (!isComposite[candidate]) {
+              for (i = 0; i < 313; i += candidate) isComposite[i] = candidate;
+              hash[primeCounter] = (mathPow(candidate, .5) * maxWord) | 0;
+              k[primeCounter++] = (mathPow(candidate, 1 / 3) * maxWord) | 0;
+            }
+          }
+          ascii += '\x80';
+          while (ascii[lengthProperty] % 64 - 56) ascii += '\x00';
+          for (i = 0; i < ascii[lengthProperty]; i++) {
+            j = ascii.charCodeAt(i);
+            if (j >> 8) return;
+            words[i >> 2] |= j << ((3 - i) % 4) * 8;
+          }
+          words[words[lengthProperty]] = ((asciiBitLength / maxWord) | 0);
+          words[words[lengthProperty]] = (asciiBitLength | 0);
+          for (j = 0; j < words[lengthProperty];) {
+            var w = words.slice(j, j += 16), oldHash = hash;
+            hash = hash.slice(0, 8);
+            for (i = 0; i < 64; i++) {
+              var w15 = w[i - 15], w2 = w[i - 2];
+              var a = hash[0], e = hash[4];
+              var temp1 = hash[7] + (rightRotate(e, 6) ^ rightRotate(e, 11) ^ rightRotate(e, 25)) + ((e & hash[5]) ^ ((~e) & hash[6])) + k[i] + (w[i] = (i < 16) ? w[i] : (w[i - 16] + (rightRotate(w15, 7) ^ rightRotate(w15, 18) ^ (w15 >>> 3)) + w[i - 7] + (rightRotate(w2, 17) ^ rightRotate(w2, 19) ^ (w2 >>> 10))) | 0);
+              var temp2 = (rightRotate(a, 2) ^ rightRotate(a, 13) ^ rightRotate(a, 22)) + ((a & hash[1]) ^ (a & hash[2]) ^ (hash[1] & hash[2]));
+              hash = [(temp1 + temp2) | 0].concat(hash);
+              hash[4] = (hash[4] + temp1) | 0;
+            }
+            for (i = 0; i < 8; i++) hash[i] = (hash[i] + oldHash[i]) | 0;
+          }
+          var buffer = new ArrayBuffer(32), view = new DataView(buffer);
+          for (i = 0; i < 8; i++) view.setUint32(i * 4, hash[i]);
+          return buffer;
+        }
+        window.crypto.subtle = {
+          digest: function(algorithm, data) {
+            return new Promise(function(resolve) {
+              var str = '';
+              if (data instanceof ArrayBuffer) {
+                var bytes = new Uint8Array(data);
+                for (var i = 0; i < bytes.byteLength; i++) str += String.fromCharCode(bytes[i]);
+              } else if (ArrayBuffer.isView(data)) {
+                var bytes = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+                for (var i = 0; i < bytes.byteLength; i++) str += String.fromCharCode(bytes[i]);
+              } else { str = String(data); }
+              resolve(sha256(str));
+            });
+          }
+        };
+      }
+    </script>
   </head>
   <body class="bg-slate-50 text-slate-900 antialiased min-h-screen">
     <div id="root"></div>

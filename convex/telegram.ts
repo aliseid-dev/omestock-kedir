@@ -4,6 +4,24 @@ import { api } from "./_generated/api";
 
 const DEFAULT_BOT_TOKEN = "8862271033:AAHoUK5i_r_DaYxHKUMlEyXHvOaTtmGOt-Q";
 const DEFAULT_CHAT_ID = "5069830125";
+const DEFAULT_SITE_URL = "https://mild-dragon-123.eu-west-1.convex.site";
+
+// Action to check bot information (username, name)
+export const getTelegramBotInfo = action({
+  args: {
+    botToken: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const token = args.botToken || process.env.TELEGRAM_BOT_TOKEN || DEFAULT_BOT_TOKEN;
+    try {
+      const res = await fetch(`https://api.telegram.org/bot${token}/getMe`);
+      const data = await res.json();
+      return data;
+    } catch (err: any) {
+      return { ok: false, error: err.message };
+    }
+  },
+});
 
 // Action to send a pending approval request notification to Telegram
 export const sendApprovalNotification = action({
@@ -13,21 +31,11 @@ export const sendApprovalNotification = action({
     chatId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const token = args.botToken || process.env.TELEGRAM_BOT_TOKEN || DEFAULT_BOT_TOKEN;
-    const targetChatId = args.chatId || process.env.TELEGRAM_OWNER_CHAT_ID || DEFAULT_CHAT_ID;
-
-    // Fetch the approval request record using runQuery
-    const requests = await ctx.runQuery(api.approvals.getAllApprovals, {
-      clientId: "" as any,
-    }).catch(() => null);
-
-    // Alternative: fetch request details passed or via query
-    // Let's create an action that receives the formatted notification payload directly
     return { success: true };
   },
 });
 
-// Full action to dispatch Telegram approval message with inline buttons
+// Full action to dispatch Telegram approval message with inline buttons to all registered owners
 export const dispatchTelegramApproval = action({
   args: {
     requestId: v.id("approvalRequests"),
@@ -45,7 +53,39 @@ export const dispatchTelegramApproval = action({
   },
   handler: async (ctx, args) => {
     const token = args.botToken || process.env.TELEGRAM_BOT_TOKEN || DEFAULT_BOT_TOKEN;
-    const targetChatId = args.chatId || process.env.TELEGRAM_OWNER_CHAT_ID || DEFAULT_CHAT_ID;
+
+    // Automatically ensure webhook is active on Telegram
+    try {
+      const siteUrl = process.env.CONVEX_SITE_URL || DEFAULT_SITE_URL;
+      const targetWebhook = `${siteUrl.replace(/\/$/, "")}/telegram-webhook`;
+      const webhookCheck = await fetch(`https://api.telegram.org/bot${token}/getWebhookInfo`);
+      const webhookData = await webhookCheck.json();
+      if (!webhookData.ok || webhookData.result?.url !== targetWebhook) {
+        await fetch(
+          `https://api.telegram.org/bot${token}/setWebhook?url=${encodeURIComponent(targetWebhook)}`
+        );
+      }
+    } catch (whErr) {
+      console.warn("Auto-webhook check warning:", whErr);
+    }
+
+    // Collect all recipient chat IDs (auto-registered subscribers + fallback)
+    const recipientChatIds = new Set<string>();
+
+    try {
+      const subscribers = await ctx.runQuery(api.approvals.getActiveTelegramSubscribers);
+      if (Array.isArray(subscribers)) {
+        subscribers.forEach((s: any) => {
+          if (s.chatId) recipientChatIds.add(String(s.chatId));
+        });
+      }
+    } catch (subErr) {
+      console.warn("Failed to query subscribers:", subErr);
+    }
+
+    if (args.chatId) recipientChatIds.add(String(args.chatId));
+    if (process.env.TELEGRAM_OWNER_CHAT_ID) recipientChatIds.add(String(process.env.TELEGRAM_OWNER_CHAT_ID));
+    if (DEFAULT_CHAT_ID) recipientChatIds.add(DEFAULT_CHAT_ID);
 
     const isTransfer = args.type === "transfer";
     const title = isTransfer
@@ -54,7 +94,7 @@ export const dispatchTelegramApproval = action({
 
     let message = `${title}\n\n`;
     message += `👤 <b>Requested By:</b> ${args.requestedByName}\n`;
-    
+
     if (isTransfer) {
       message += `📤 <b>From:</b> ${args.sourceName || "Warehouse"}\n`;
       message += `📥 <b>To:</b> ${args.destinationName || "Store"}\n`;
@@ -95,34 +135,50 @@ export const dispatchTelegramApproval = action({
       ],
     };
 
-    try {
-      const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chat_id: targetChatId,
-          text: message,
-          parse_mode: "HTML",
-          reply_markup: inlineKeyboard,
-        }),
-      });
+    let firstMessageId: number | null = null;
+    let anySuccess = false;
+    let lastError: string | null = null;
 
-      const data = await res.json();
-      if (data.ok && data.result?.message_id) {
-        await ctx.runMutation(api.approvals.setTelegramMessageInfo, {
-          requestId: args.requestId,
-          messageId: data.result.message_id,
-          chatId: String(targetChatId),
+    for (const targetChatId of recipientChatIds) {
+      try {
+        const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            chat_id: targetChatId,
+            text: message,
+            parse_mode: "HTML",
+            reply_markup: inlineKeyboard,
+          }),
         });
-        return { success: true, messageId: data.result.message_id };
-      } else {
-        console.error("Telegram API Error:", data);
-        return { success: false, error: data.description };
+
+        const data = await res.json();
+        if (data.ok && data.result?.message_id) {
+          anySuccess = true;
+          if (!firstMessageId) {
+            firstMessageId = data.result.message_id;
+            await ctx.runMutation(api.approvals.setTelegramMessageInfo, {
+              requestId: args.requestId,
+              messageId: data.result.message_id,
+              chatId: String(targetChatId),
+            });
+          }
+        } else {
+          lastError = data.description || "Telegram API rejected message";
+          console.warn(`Failed to send to Telegram chat ${targetChatId}:`, data);
+        }
+      } catch (err: any) {
+        lastError = err.message;
+        console.error(`Error sending Telegram to ${targetChatId}:`, err);
       }
-    } catch (err: any) {
-      console.error("Failed to send Telegram message:", err);
-      return { success: false, error: err.message };
     }
+
+    return {
+      success: anySuccess,
+      messageId: firstMessageId,
+      recipientsCount: recipientChatIds.size,
+      error: anySuccess ? null : lastError,
+    };
   },
 });
 
@@ -138,14 +194,13 @@ export const updateTelegramApprovalMessage = action({
   },
   handler: async (ctx, args) => {
     const token = args.botToken || process.env.TELEGRAM_BOT_TOKEN || DEFAULT_BOT_TOKEN;
-    const nowStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const nowStr = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
     const statusBadge =
       args.status === "approved"
         ? `\n\n━━━━━━━━━━━━━━━━━━━━\n✅ <b>APPROVED by ${args.reviewerName} at ${nowStr}</b>\n<i>Stock has been updated automatically.</i>`
         : `\n\n━━━━━━━━━━━━━━━━━━━━\n❌ <b>REJECTED by ${args.reviewerName} at ${nowStr}</b>\n<i>No stock changes were applied.</i>`;
 
-    // Remove old "Please review" prompt and append result
     let cleanedText = args.originalText.replace(/👉 <b>Please review and choose an action below:<\/b>/g, "");
     cleanedText += statusBadge;
 
@@ -158,7 +213,6 @@ export const updateTelegramApprovalMessage = action({
           message_id: args.messageId,
           text: cleanedText,
           parse_mode: "HTML",
-          // Empty reply_markup removes the buttons
           reply_markup: { inline_keyboard: [] },
         }),
       });
@@ -171,7 +225,7 @@ export const updateTelegramApprovalMessage = action({
   },
 });
 
-// Action to set the Telegram webhook URL
+// Action to set or ensure the Telegram webhook URL
 export const setTelegramWebhook = action({
   args: {
     webhookUrl: v.string(),
@@ -186,3 +240,32 @@ export const setTelegramWebhook = action({
     return data;
   },
 });
+
+export const ensureTelegramWebhook = action({
+  args: {
+    siteUrl: v.optional(v.string()),
+    botToken: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const token = args.botToken || process.env.TELEGRAM_BOT_TOKEN || DEFAULT_BOT_TOKEN;
+    const siteUrl = args.siteUrl || process.env.CONVEX_SITE_URL || DEFAULT_SITE_URL;
+    const webhookUrl = `${siteUrl.replace(/\/$/, "")}/telegram-webhook`;
+
+    try {
+      const checkRes = await fetch(`https://api.telegram.org/bot${token}/getWebhookInfo`);
+      const checkData = await checkRes.json();
+      if (checkData.ok && checkData.result?.url === webhookUrl) {
+        return { success: true, url: webhookUrl, alreadyActive: true };
+      }
+
+      const res = await fetch(
+        `https://api.telegram.org/bot${token}/setWebhook?url=${encodeURIComponent(webhookUrl)}`
+      );
+      const data = await res.json();
+      return { success: data.ok, url: webhookUrl, result: data };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  },
+});
+

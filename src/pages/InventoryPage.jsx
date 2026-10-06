@@ -825,6 +825,11 @@ export function InventoryPage() {
     e.preventDefault()
     if (!activeLocation) return
 
+    if (!isOwner) {
+      toast.error('Permission Denied', 'Only business owners can add new items without recording sales.')
+      return
+    }
+
     if (!warehouseAddProductForm.name.trim()) {
       toast.warning('Product Name Required', 'Please enter a product name.')
       return
@@ -962,7 +967,7 @@ export function InventoryPage() {
             quantity: qty,
             costPerUnit: cost,
             unit: targetProductUnit,
-            sellingPrice: parseFloat(newProductSellingPrice) || undefined,
+            sellingPrice: isWarehousePurchaseNewProduct && newProductSellingPrice ? parseFloat(newProductSellingPrice) : undefined,
             minStockThreshold: 5,
           }],
           paymentMethod,
@@ -1113,6 +1118,11 @@ export function InventoryPage() {
     e.preventDefault()
     if (!activeLocation) return
 
+    if (!isOwner) {
+      toast.error('Permission Denied', 'Only business owners can add new items without recording sales.')
+      return
+    }
+
     if (!storeAddProductForm.name.trim()) {
       toast.warning('Product Name Required', 'Please enter a product name.')
       return
@@ -1249,7 +1259,7 @@ export function InventoryPage() {
             quantity: qty,
             costPerUnit: cost,
             unit: targetProductUnit,
-            sellingPrice: parseFloat(newProductSellingPrice) || undefined,
+            sellingPrice: isStorePurchaseNewProduct && newProductSellingPrice ? parseFloat(newProductSellingPrice) : undefined,
             minStockThreshold: 5,
           }],
           paymentMethod,
@@ -2025,29 +2035,31 @@ export function InventoryPage() {
               </p>
             </div>
 
-            {/* Location Actions: Add Item, Direct Purchase, Transfer */}
-            <div className="grid grid-cols-3 sm:flex sm:items-center gap-2 w-full sm:w-auto">
+            {/* Location Actions: Add Item (Owner Only), Direct Purchase, Transfer */}
+            <div className={`${isOwner ? 'grid grid-cols-2 sm:flex' : 'flex'} items-center gap-2 w-full sm:w-auto`}>
               {activeLocationType === 'warehouse' ? (
                 <>
-                  <Button
-                    size="md"
-                    variant="primary"
-                    onClick={() => {
-                      setWarehouseAddProductForm({
-                        name: '',
-                        category: 'General',
-                        sellingPrice: '30',
-                        costPrice: '20',
-                        initialQuantity: '10',
-                        minStockThreshold: '5',
-                      })
-                      setIsWarehouseAddProductOpen(true)
-                    }}
-                    className="w-full sm:w-auto bg-black hover:bg-slate-800 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 py-2.5 px-2 sm:px-4 rounded-xl cursor-pointer"
-                  >
-                    <Plus className="w-4 h-4 shrink-0" />
-                    <span>Add Item</span>
-                  </Button>
+                  {isOwner && (
+                    <Button
+                      size="md"
+                      variant="primary"
+                      onClick={() => {
+                        setWarehouseAddProductForm({
+                          name: '',
+                          category: 'General',
+                          sellingPrice: '30',
+                          costPrice: '20',
+                          initialQuantity: '10',
+                          minStockThreshold: '5',
+                        })
+                        setIsWarehouseAddProductOpen(true)
+                      }}
+                      className="w-full sm:w-auto bg-black hover:bg-slate-800 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 py-2.5 px-2 sm:px-4 rounded-xl cursor-pointer"
+                    >
+                      <Plus className="w-4 h-4 shrink-0" />
+                      <span>Add Item</span>
+                    </Button>
+                  )}
 
                   <Button
                     size="md"
@@ -2081,25 +2093,27 @@ export function InventoryPage() {
                 </>
               ) : (
                 <>
-                  <Button
-                    size="md"
-                    variant="primary"
-                    onClick={() => {
-                      setStoreAddProductForm({
-                        name: '',
-                        category: 'General',
-                        sellingPrice: '30',
-                        costPrice: '20',
-                        initialQuantity: '10',
-                        minStockThreshold: '5',
-                      })
-                      setIsStoreAddProductOpen(true)
-                    }}
-                    className="w-full sm:w-auto bg-black hover:bg-slate-800 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 py-2.5 px-2 sm:px-4 rounded-xl cursor-pointer"
-                  >
-                    <Plus className="w-4 h-4 shrink-0" />
-                    <span>Add Item</span>
-                  </Button>
+                  {isOwner && (
+                    <Button
+                      size="md"
+                      variant="primary"
+                      onClick={() => {
+                        setStoreAddProductForm({
+                          name: '',
+                          category: 'General',
+                          sellingPrice: '30',
+                          costPrice: '20',
+                          initialQuantity: '10',
+                          minStockThreshold: '5',
+                        })
+                        setIsStoreAddProductOpen(true)
+                      }}
+                      className="w-full sm:w-auto bg-black hover:bg-slate-800 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 py-2.5 px-2 sm:px-4 rounded-xl cursor-pointer"
+                    >
+                      <Plus className="w-4 h-4 shrink-0" />
+                      <span>Add Item</span>
+                    </Button>
+                  )}
 
                   <Button
                     size="md"
@@ -2713,7 +2727,7 @@ export function InventoryPage() {
       {/* ───────────────────────────────────────────────────────────── */}
       {/* 1. MODAL: ADD PRODUCT DIRECTLY TO WAREHOUSE                   */}
       {/* ───────────────────────────────────────────────────────────── */}
-      {isWarehouseAddProductOpen && (
+      {isWarehouseAddProductOpen && isOwner && (
         <Modal
           isOpen={isWarehouseAddProductOpen}
           onClose={() => setIsWarehouseAddProductOpen(false)}
@@ -3230,7 +3244,7 @@ export function InventoryPage() {
       {/* ───────────────────────────────────────────────────────────── */}
       {/* 4. MODAL: ADD PRODUCT DIRECTLY TO STORE                       */}
       {/* ───────────────────────────────────────────────────────────── */}
-      {isStoreAddProductOpen && (
+      {isStoreAddProductOpen && isOwner && (
         <Modal
           isOpen={isStoreAddProductOpen}
           onClose={() => setIsStoreAddProductOpen(false)}
@@ -3624,7 +3638,7 @@ export function InventoryPage() {
                 {isSubmittingStorePurchase
                   ? 'Submitting...'
                   : (!isOwner || requireTelegramApproval
-                    ? 'Send for Telegram Approval'
+                    ? 'Request Approval'
                     : 'Record Direct Purchase')}
               </Button>
             </div>

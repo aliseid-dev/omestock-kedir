@@ -448,3 +448,148 @@ export const rejectRequest = mutation({
     return { success: true, updatedRequest: await ctx.db.get(args.requestId) };
   },
 });
+
+// Auto-register a Telegram chat/user as an active approver without asking for their ID
+export const registerTelegramSubscriber = mutation({
+  args: {
+    chatId: v.string(),
+    username: v.optional(v.string()),
+    firstName: v.optional(v.string()),
+    lastName: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db
+      .query("telegramSubscribers")
+      .withIndex("by_chatId", (q) => q.eq("chatId", args.chatId))
+      .first();
+
+    const now = new Date().toISOString();
+
+    if (existing) {
+      await ctx.db.patch(existing._id, {
+        username: args.username || existing.username,
+        firstName: args.firstName || existing.firstName,
+        lastName: args.lastName || existing.lastName,
+        isActive: true,
+        lastInteractionAt: now,
+      });
+      return existing._id;
+    } else {
+      const id = await ctx.db.insert("telegramSubscribers", {
+        chatId: args.chatId,
+        username: args.username,
+        firstName: args.firstName,
+        lastName: args.lastName,
+        role: "owner",
+        isActive: true,
+        lastInteractionAt: now,
+        createdAt: now,
+      });
+
+      // Also link to the default active client record if available
+      const client = await ctx.db.query("clients").first();
+      if (client && !client.telegramChatId) {
+        await ctx.db.patch(client._id, { telegramChatId: args.chatId });
+      }
+
+      return id;
+    }
+  },
+});
+
+// Get all active Telegram subscribers who should receive notifications
+export const getActiveTelegramSubscribers = query({
+  args: {},
+  handler: async (ctx) => {
+    const subs = await ctx.db
+      .query("telegramSubscribers")
+      .filter((q) => q.eq(q.field("isActive"), true))
+      .collect();
+    return subs;
+  },
+});
+
+// Get pending requests for direct Telegram inspection
+export const getPendingRequestsForTelegram = query({
+  args: {},
+  handler: async (ctx) => {
+    const list = await ctx.db
+      .query("approvalRequests")
+      .filter((q) => q.eq(q.field("status"), "pending"))
+      .order("desc")
+      .take(10);
+    return list;
+  },
+});
+
+// Get a single approval request by ID
+export const getApprovalRequestById = query({
+  args: { requestId: v.id("approvalRequests") },
+  handler: async (ctx, args) => {
+    return await ctx.db.get(args.requestId);
+  },
+});
+
+// Get current interactive Telegram session for a chat
+export const getTelegramSession = query({
+  args: { chatId: v.string() },
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("telegramSessions")
+      .withIndex("by_chatId", (q) => q.eq("chatId", args.chatId))
+      .first();
+  },
+});
+
+// Set or advance interactive Telegram session for a chat
+export const setTelegramSession = mutation({
+  args: {
+    chatId: v.string(),
+    requestId: v.id("approvalRequests"),
+    step: v.union(v.literal("awaiting_min_alert"), v.literal("awaiting_selling_price")),
+    minStockThreshold: v.optional(v.number()),
+    originalMessageId: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db
+      .query("telegramSessions")
+      .withIndex("by_chatId", (q) => q.eq("chatId", args.chatId))
+      .first();
+
+    const now = new Date().toISOString();
+    if (existing) {
+      await ctx.db.patch(existing._id, {
+        requestId: args.requestId,
+        step: args.step,
+        minStockThreshold: args.minStockThreshold !== undefined ? args.minStockThreshold : existing.minStockThreshold,
+        originalMessageId: args.originalMessageId !== undefined ? args.originalMessageId : existing.originalMessageId,
+        updatedAt: now,
+      });
+      return existing._id;
+    } else {
+      return await ctx.db.insert("telegramSessions", {
+        chatId: args.chatId,
+        requestId: args.requestId,
+        step: args.step,
+        minStockThreshold: args.minStockThreshold,
+        originalMessageId: args.originalMessageId,
+        updatedAt: now,
+      });
+    }
+  },
+});
+
+// Clear interactive Telegram session
+export const clearTelegramSession = mutation({
+  args: { chatId: v.string() },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db
+      .query("telegramSessions")
+      .withIndex("by_chatId", (q) => q.eq("chatId", args.chatId))
+      .first();
+    if (existing) {
+      await ctx.db.delete(existing._id);
+    }
+  },
+});
+

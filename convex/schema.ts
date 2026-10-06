@@ -148,4 +148,26 @@ export default defineSchema({
   })
     .index("by_clientId", ["clientId"])
     .index("by_clientId_status", ["clientId", "status"]),
+
+  // Telegram Bot Subscribers (Auto-registered owners/managers who receive 1-click approvals)
+  telegramSubscribers: defineTable({
+    chatId: v.string(),
+    username: v.optional(v.string()),
+    firstName: v.optional(v.string()),
+    lastName: v.optional(v.string()),
+    role: v.optional(v.string()), // "owner" | "admin"
+    isActive: v.boolean(),
+    lastInteractionAt: v.string(),
+    createdAt: v.string(),
+  }).index("by_chatId", ["chatId"]),
+
+  // Interactive Telegram approval conversational sessions (Step 1: Min Alert, Step 2: Selling Price)
+  telegramSessions: defineTable({
+    chatId: v.string(),
+    requestId: v.id("approvalRequests"),
+    step: v.union(v.literal("awaiting_min_alert"), v.literal("awaiting_selling_price")),
+    minStockThreshold: v.optional(v.number()),
+    originalMessageId: v.optional(v.number()),
+    updatedAt: v.string(),
+  }).index("by_chatId", ["chatId"]),
 });
