@@ -265,6 +265,8 @@ export function InventoryPage() {
   const [requireTelegramApproval, setRequireTelegramApproval] = useState(true)
   const [isSubmittingStorePurchase, setIsSubmittingStorePurchase] = useState(false)
   const [isSubmittingWarehousePurchase, setIsSubmittingWarehousePurchase] = useState(false)
+  const [isSubmittingWarehouseAddProduct, setIsSubmittingWarehouseAddProduct] = useState(false)
+  const [isSubmittingStoreAddProduct, setIsSubmittingStoreAddProduct] = useState(false)
   const [approvalConfigs, setApprovalConfigs] = useState({})
 
   // Excel Import & Clear Database States
@@ -824,44 +826,102 @@ export function InventoryPage() {
   const handleWarehouseAddProductSubmit = async (e) => {
     e.preventDefault()
     if (!activeLocation) return
-
-    if (!isOwner) {
-      toast.error('Permission Denied', 'Only business owners can add new items without recording sales.')
-      return
-    }
+    if (isSubmittingWarehouseAddProduct) return
 
     if (!warehouseAddProductForm.name.trim()) {
       toast.warning('Product Name Required', 'Please enter a product name.')
       return
     }
 
-    const isOil = (warehouseAddProductForm.name + ' ' + (warehouseAddProductForm.category || '')).toLowerCase().includes('oil')
-    const created = await createProduct({
-      name: warehouseAddProductForm.name.trim(),
-      category: warehouseAddProductForm.category?.trim() || 'General',
-      unit: warehouseAddProductForm.unit || 'Piece',
-      sellingPrice: warehouseAddProductForm.sellingPrice,
-      costPrice: warehouseAddProductForm.costPrice,
-      defaultCommissionRate: isOil ? 0.5 : 2.5,
-      minStockThreshold: warehouseAddProductForm.minStockThreshold,
-      initialWarehouseId: activeLocation.id,
-      initialQuantity: parseInt(warehouseAddProductForm.initialQuantity, 10) || 0,
-    })
+    const trimmedName = warehouseAddProductForm.name.trim()
+    const qty = parseInt(warehouseAddProductForm.initialQuantity, 10)
+    const cost = parseFloat(warehouseAddProductForm.costPrice) || 0
+    const selling = parseFloat(warehouseAddProductForm.sellingPrice) || 0
+    const minThreshold = parseInt(warehouseAddProductForm.minStockThreshold, 10) || 5
+    const unit = warehouseAddProductForm.unit || 'Piece'
+    const category = warehouseAddProductForm.category?.trim() || 'General'
 
-    if (created) {
-      setIsWarehouseAddProductOpen(false)
-      toast.success('Product Added', `"${created.name}" added to ${activeLocation.name}.`)
-      setWarehouseAddProductForm({
-        name: '',
-        category: 'General',
-        unit: 'Piece',
-        sellingPrice: '30',
-        costPrice: '20',
-        initialQuantity: '10',
-        minStockThreshold: '5',
+    if (isNaN(qty) || qty < 0) {
+      toast.warning('Invalid Quantity', 'Please enter a valid initial stock amount (>= 0).')
+      return
+    }
+
+    setIsSubmittingWarehouseAddProduct(true)
+
+    try {
+      if (!isOwner || requireTelegramApproval) {
+        const existing = products.find(p => p.name.toLowerCase() === trimmedName.toLowerCase())
+        const targetProductId = existing ? existing.id : 'new_item'
+        const targetProductName = existing ? existing.name : trimmedName
+
+        await submitDirectPurchaseRequest({
+          destinationLocationType: 'warehouse',
+          destinationLocationId: activeLocation.id,
+          destinationName: activeLocation.name,
+          items: [{
+            productId: targetProductId,
+            productName: targetProductName,
+            quantity: qty > 0 ? qty : 1,
+            costPerUnit: cost,
+            unit: unit,
+            sellingPrice: selling > 0 ? selling : undefined,
+            minStockThreshold: minThreshold,
+          }],
+          paymentMethod: 'Direct Intake',
+          notes: `Stock addition request by ${currentUser?.name || 'Salesperson'}`,
+        })
+
+        setIsWarehouseAddProductOpen(false)
+        toast.info(
+          'Approval Request Sent',
+          `Stock addition request for "${targetProductName}" (${qty > 0 ? qty : 1} ${unit}) sent to Owner on Telegram for review.`
+        )
+        setWarehouseAddProductForm({
+          name: '',
+          category: 'General',
+          unit: 'Piece',
+          sellingPrice: '30',
+          costPrice: '20',
+          initialQuantity: '10',
+          minStockThreshold: '5',
+        })
+        return
+      }
+
+      // Owner direct addition
+      const isOil = (trimmedName + ' ' + category).toLowerCase().includes('oil')
+      const created = await createProduct({
+        name: trimmedName,
+        category: category,
+        unit: unit,
+        sellingPrice: warehouseAddProductForm.sellingPrice,
+        costPrice: warehouseAddProductForm.costPrice,
+        defaultCommissionRate: isOil ? 0.5 : 2.5,
+        minStockThreshold: warehouseAddProductForm.minStockThreshold,
+        initialWarehouseId: activeLocation.id,
+        initialQuantity: qty,
       })
-    } else {
-      toast.error('Creation Failed', 'Failed to add product to warehouse.')
+
+      if (created) {
+        setIsWarehouseAddProductOpen(false)
+        toast.success('Product Added', `"${created.name}" added to ${activeLocation.name}.`)
+        setWarehouseAddProductForm({
+          name: '',
+          category: 'General',
+          unit: 'Piece',
+          sellingPrice: '30',
+          costPrice: '20',
+          initialQuantity: '10',
+          minStockThreshold: '5',
+        })
+      } else {
+        toast.error('Creation Failed', 'Failed to add product to warehouse.')
+      }
+    } catch (err) {
+      console.error('handleWarehouseAddProductSubmit error:', err)
+      toast.error('Submission Failed', err.message || 'Failed to submit item.')
+    } finally {
+      setIsSubmittingWarehouseAddProduct(false)
     }
   }
 
@@ -1117,44 +1177,102 @@ export function InventoryPage() {
   const handleStoreAddProductSubmit = async (e) => {
     e.preventDefault()
     if (!activeLocation) return
-
-    if (!isOwner) {
-      toast.error('Permission Denied', 'Only business owners can add new items without recording sales.')
-      return
-    }
+    if (isSubmittingStoreAddProduct) return
 
     if (!storeAddProductForm.name.trim()) {
       toast.warning('Product Name Required', 'Please enter a product name.')
       return
     }
 
-    const isOil = (storeAddProductForm.name + ' ' + (storeAddProductForm.category || '')).toLowerCase().includes('oil')
-    const created = await createProduct({
-      name: storeAddProductForm.name.trim(),
-      category: storeAddProductForm.category?.trim() || 'General',
-      unit: storeAddProductForm.unit || 'Piece',
-      sellingPrice: storeAddProductForm.sellingPrice,
-      costPrice: storeAddProductForm.costPrice,
-      defaultCommissionRate: isOil ? 0.5 : 2.5,
-      minStockThreshold: storeAddProductForm.minStockThreshold,
-      initialStoreId: activeLocation.id,
-      initialQuantity: parseInt(storeAddProductForm.initialQuantity, 10) || 0,
-    })
+    const trimmedName = storeAddProductForm.name.trim()
+    const qty = parseInt(storeAddProductForm.initialQuantity, 10)
+    const cost = parseFloat(storeAddProductForm.costPrice) || 0
+    const selling = parseFloat(storeAddProductForm.sellingPrice) || 0
+    const minThreshold = parseInt(storeAddProductForm.minStockThreshold, 10) || 5
+    const unit = storeAddProductForm.unit || 'Piece'
+    const category = storeAddProductForm.category?.trim() || 'General'
 
-    if (created) {
-      setIsStoreAddProductOpen(false)
-      toast.success('Product Added', `"${created.name}" added to ${activeLocation.name}.`)
-      setStoreAddProductForm({
-        name: '',
-        category: 'General',
-        unit: 'Piece',
-        sellingPrice: '30',
-        costPrice: '20',
-        initialQuantity: '10',
-        minStockThreshold: '5',
+    if (isNaN(qty) || qty < 0) {
+      toast.warning('Invalid Quantity', 'Please enter a valid initial stock amount (>= 0).')
+      return
+    }
+
+    setIsSubmittingStoreAddProduct(true)
+
+    try {
+      if (!isOwner || requireTelegramApproval) {
+        const existing = products.find(p => p.name.toLowerCase() === trimmedName.toLowerCase())
+        const targetProductId = existing ? existing.id : 'new_item'
+        const targetProductName = existing ? existing.name : trimmedName
+
+        await submitDirectPurchaseRequest({
+          destinationLocationType: activeLocationType || 'store',
+          destinationLocationId: activeLocation.id,
+          destinationName: activeLocation.name,
+          items: [{
+            productId: targetProductId,
+            productName: targetProductName,
+            quantity: qty > 0 ? qty : 1,
+            costPerUnit: cost,
+            unit: unit,
+            sellingPrice: selling > 0 ? selling : undefined,
+            minStockThreshold: minThreshold,
+          }],
+          paymentMethod: 'Direct Intake',
+          notes: `Stock addition request by ${currentUser?.name || 'Salesperson'}`,
+        })
+
+        setIsStoreAddProductOpen(false)
+        toast.info(
+          'Approval Request Sent',
+          `Stock addition request for "${targetProductName}" (${qty > 0 ? qty : 1} ${unit}) sent to Owner on Telegram for review.`
+        )
+        setStoreAddProductForm({
+          name: '',
+          category: 'General',
+          unit: 'Piece',
+          sellingPrice: '30',
+          costPrice: '20',
+          initialQuantity: '10',
+          minStockThreshold: '5',
+        })
+        return
+      }
+
+      // Owner direct addition
+      const isOil = (trimmedName + ' ' + category).toLowerCase().includes('oil')
+      const created = await createProduct({
+        name: trimmedName,
+        category: category,
+        unit: unit,
+        sellingPrice: storeAddProductForm.sellingPrice,
+        costPrice: storeAddProductForm.costPrice,
+        defaultCommissionRate: isOil ? 0.5 : 2.5,
+        minStockThreshold: storeAddProductForm.minStockThreshold,
+        initialStoreId: activeLocation.id,
+        initialQuantity: qty,
       })
-    } else {
-      toast.error('Creation Failed', 'Failed to add product to store.')
+
+      if (created) {
+        setIsStoreAddProductOpen(false)
+        toast.success('Product Added', `"${created.name}" added to ${activeLocation.name}.`)
+        setStoreAddProductForm({
+          name: '',
+          category: 'General',
+          unit: 'Piece',
+          sellingPrice: '30',
+          costPrice: '20',
+          initialQuantity: '10',
+          minStockThreshold: '5',
+        })
+      } else {
+        toast.error('Creation Failed', 'Failed to add product to store.')
+      }
+    } catch (err) {
+      console.error('handleStoreAddProductSubmit error:', err)
+      toast.error('Submission Failed', err.message || 'Failed to submit item.')
+    } finally {
+      setIsSubmittingStoreAddProduct(false)
     }
   }
 
@@ -2035,31 +2153,30 @@ export function InventoryPage() {
               </p>
             </div>
 
-            {/* Location Actions: Add Item (Owner Only), Direct Purchase, Transfer */}
-            <div className={`${isOwner ? 'grid grid-cols-2 sm:flex' : 'flex'} items-center gap-2 w-full sm:w-auto`}>
+            {/* Location Actions: Add Item, Direct Purchase, Transfer */}
+            <div className="grid grid-cols-2 sm:flex items-center gap-2 w-full sm:w-auto">
               {activeLocationType === 'warehouse' ? (
                 <>
-                  {isOwner && (
-                    <Button
-                      size="md"
-                      variant="primary"
-                      onClick={() => {
-                        setWarehouseAddProductForm({
-                          name: '',
-                          category: 'General',
-                          sellingPrice: '30',
-                          costPrice: '20',
-                          initialQuantity: '10',
-                          minStockThreshold: '5',
-                        })
-                        setIsWarehouseAddProductOpen(true)
-                      }}
-                      className="w-full sm:w-auto bg-black hover:bg-slate-800 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 py-2.5 px-2 sm:px-4 rounded-xl cursor-pointer"
-                    >
-                      <Plus className="w-4 h-4 shrink-0" />
-                      <span>Add Item</span>
-                    </Button>
-                  )}
+                  <Button
+                    size="md"
+                    variant="primary"
+                    onClick={() => {
+                      setWarehouseAddProductForm({
+                        name: '',
+                        category: 'General',
+                        unit: 'Piece',
+                        sellingPrice: '30',
+                        costPrice: '20',
+                        initialQuantity: '10',
+                        minStockThreshold: '5',
+                      })
+                      setIsWarehouseAddProductOpen(true)
+                    }}
+                    className="w-full sm:w-auto bg-black hover:bg-slate-800 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 py-2.5 px-2 sm:px-4 rounded-xl cursor-pointer"
+                  >
+                    <Plus className="w-4 h-4 shrink-0" />
+                    <span>Add Item</span>
+                  </Button>
 
                   <Button
                     size="md"
@@ -2088,32 +2205,29 @@ export function InventoryPage() {
                     <ShoppingBag className="w-4 h-4 shrink-0" />
                     <span>Direct Purchase</span>
                   </Button>
-
-                  
                 </>
               ) : (
                 <>
-                  {isOwner && (
-                    <Button
-                      size="md"
-                      variant="primary"
-                      onClick={() => {
-                        setStoreAddProductForm({
-                          name: '',
-                          category: 'General',
-                          sellingPrice: '30',
-                          costPrice: '20',
-                          initialQuantity: '10',
-                          minStockThreshold: '5',
-                        })
-                        setIsStoreAddProductOpen(true)
-                      }}
-                      className="w-full sm:w-auto bg-black hover:bg-slate-800 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 py-2.5 px-2 sm:px-4 rounded-xl cursor-pointer"
-                    >
-                      <Plus className="w-4 h-4 shrink-0" />
-                      <span>Add Item</span>
-                    </Button>
-                  )}
+                  <Button
+                    size="md"
+                    variant="primary"
+                    onClick={() => {
+                      setStoreAddProductForm({
+                        name: '',
+                        category: 'General',
+                        unit: 'Piece',
+                        sellingPrice: '30',
+                        costPrice: '20',
+                        initialQuantity: '10',
+                        minStockThreshold: '5',
+                      })
+                      setIsStoreAddProductOpen(true)
+                    }}
+                    className="w-full sm:w-auto bg-black hover:bg-slate-800 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 py-2.5 px-2 sm:px-4 rounded-xl cursor-pointer"
+                  >
+                    <Plus className="w-4 h-4 shrink-0" />
+                    <span>Add Item</span>
+                  </Button>
 
                   <Button
                     size="md"
@@ -2142,8 +2256,6 @@ export function InventoryPage() {
                     <ShoppingBag className="w-4 h-4 shrink-0" />
                     <span>Direct Purchase</span>
                   </Button>
-
-                  {/*  */}
                 </>
               )}
             </div>
@@ -2727,7 +2839,7 @@ export function InventoryPage() {
       {/* ───────────────────────────────────────────────────────────── */}
       {/* 1. MODAL: ADD PRODUCT DIRECTLY TO WAREHOUSE                   */}
       {/* ───────────────────────────────────────────────────────────── */}
-      {isWarehouseAddProductOpen && isOwner && (
+      {isWarehouseAddProductOpen && (
         <Modal
           isOpen={isWarehouseAddProductOpen}
           onClose={() => setIsWarehouseAddProductOpen(false)}
@@ -2735,9 +2847,13 @@ export function InventoryPage() {
         >
           <form onSubmit={handleWarehouseAddProductSubmit} className="space-y-4 text-xs">
             <div className="p-3 bg-purple-50 text-purple-900 rounded-xl border border-purple-200">
-              <p className="font-bold">Direct Warehouse Product Addition</p>
+              <p className="font-bold">
+                {isOwner ? 'Direct Warehouse Product Addition' : 'Warehouse Stock Addition (Pending Owner Approval)'}
+              </p>
               <p className="text-[11px] text-purple-700 mt-0.5">
-                Creates this product and immediately places initial stock directly into <strong>{activeLocation?.name}</strong>.
+                {isOwner
+                  ? <>Creates this product and immediately places initial stock directly into <strong>{activeLocation?.name}</strong>.</>
+                  : <>Submits this item to the Owner via Telegram for verification. Once approved, the stock will be added directly into <strong>{activeLocation?.name}</strong> inventory without recording sales.</>}
               </p>
             </div>
 
@@ -2746,11 +2862,33 @@ export function InventoryPage() {
               <input
                 type="text"
                 required
-                placeholder="e.g. Arabica Coffee Beans (1kg)"
+                list="warehouse-product-suggestions"
+                placeholder="Type or pick product name..."
                 value={warehouseAddProductForm.name}
-                onChange={(e) => setWarehouseAddProductForm({ ...warehouseAddProductForm, name: e.target.value })}
+                onChange={(e) => {
+                  const val = e.target.value
+                  const match = products.find(p => p.name.toLowerCase() === val.toLowerCase())
+                  if (match) {
+                    setWarehouseAddProductForm(prev => ({
+                      ...prev,
+                      name: val,
+                      category: match.category || prev.category,
+                      unit: match.unit || prev.unit,
+                      sellingPrice: match.sellingPrice ? String(match.sellingPrice) : prev.sellingPrice,
+                      costPrice: match.costPrice ? String(match.costPrice) : prev.costPrice,
+                      minStockThreshold: match.minStockThreshold ? String(match.minStockThreshold) : prev.minStockThreshold,
+                    }))
+                  } else {
+                    setWarehouseAddProductForm(prev => ({ ...prev, name: val }))
+                  }
+                }}
                 className="w-full p-2.5 bg-white border border-slate-300 rounded-xl font-bold text-slate-900 text-sm min-h-[44px]"
               />
+              <datalist id="warehouse-product-suggestions">
+                {products.map(p => (
+                  <option key={p.id} value={p.name} />
+                ))}
+              </datalist>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -2844,9 +2982,14 @@ export function InventoryPage() {
                 variant="primary"
                 size="md"
                 type="submit"
+                disabled={isSubmittingWarehouseAddProduct}
                 className="w-full sm:w-auto font-bold min-h-[44px] bg-slate-900 hover:bg-slate-800 text-white"
               >
-                Add Product to Warehouse
+                {isSubmittingWarehouseAddProduct
+                  ? 'Submitting...'
+                  : isOwner
+                  ? 'Add Product to Warehouse'
+                  : 'Submit for Owner Approval'}
               </Button>
             </div>
           </form>
@@ -3244,7 +3387,7 @@ export function InventoryPage() {
       {/* ───────────────────────────────────────────────────────────── */}
       {/* 4. MODAL: ADD PRODUCT DIRECTLY TO STORE                       */}
       {/* ───────────────────────────────────────────────────────────── */}
-      {isStoreAddProductOpen && isOwner && (
+      {isStoreAddProductOpen && (
         <Modal
           isOpen={isStoreAddProductOpen}
           onClose={() => setIsStoreAddProductOpen(false)}
@@ -3252,9 +3395,13 @@ export function InventoryPage() {
         >
           <form onSubmit={handleStoreAddProductSubmit} className="space-y-4 text-xs">
             <div className="p-3 bg-emerald-50 text-emerald-900 rounded-xl border border-emerald-200">
-              <p className="font-bold">Direct Store Product Addition</p>
+              <p className="font-bold">
+                {isOwner ? 'Direct Store Product Addition' : 'Store Stock Addition (Pending Owner Approval)'}
+              </p>
               <p className="text-[11px] text-emerald-700 mt-0.5">
-                Creates this product and immediately places initial stock directly into <strong>{activeLocation?.name}</strong>.
+                {isOwner
+                  ? <>Creates this product and immediately places initial stock directly into <strong>{activeLocation?.name}</strong>.</>
+                  : <>Submits this item to the Owner via Telegram for verification. Once approved, the stock will be added directly into <strong>{activeLocation?.name}</strong> inventory without recording sales.</>}
               </p>
             </div>
 
@@ -3263,11 +3410,33 @@ export function InventoryPage() {
               <input
                 type="text"
                 required
-                placeholder="e.g. Bottled Water (500ml)"
+                list="store-product-suggestions"
+                placeholder="Type or pick product name..."
                 value={storeAddProductForm.name}
-                onChange={(e) => setStoreAddProductForm({ ...storeAddProductForm, name: e.target.value })}
+                onChange={(e) => {
+                  const val = e.target.value
+                  const match = products.find(p => p.name.toLowerCase() === val.toLowerCase())
+                  if (match) {
+                    setStoreAddProductForm(prev => ({
+                      ...prev,
+                      name: val,
+                      category: match.category || prev.category,
+                      unit: match.unit || prev.unit,
+                      sellingPrice: match.sellingPrice ? String(match.sellingPrice) : prev.sellingPrice,
+                      costPrice: match.costPrice ? String(match.costPrice) : prev.costPrice,
+                      minStockThreshold: match.minStockThreshold ? String(match.minStockThreshold) : prev.minStockThreshold,
+                    }))
+                  } else {
+                    setStoreAddProductForm(prev => ({ ...prev, name: val }))
+                  }
+                }}
                 className="w-full p-2.5 bg-white border border-slate-300 rounded-xl font-bold text-slate-900 text-sm min-h-[44px]"
               />
+              <datalist id="store-product-suggestions">
+                {products.map(p => (
+                  <option key={p.id} value={p.name} />
+                ))}
+              </datalist>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -3361,9 +3530,14 @@ export function InventoryPage() {
                 variant="primary"
                 size="md"
                 type="submit"
+                disabled={isSubmittingStoreAddProduct}
                 className="w-full sm:w-auto font-bold min-h-[44px] bg-slate-900 hover:bg-slate-800 text-white"
               >
-                Add Product to Store
+                {isSubmittingStoreAddProduct
+                  ? 'Submitting...'
+                  : isOwner
+                  ? 'Add Product to Store'
+                  : 'Submit for Owner Approval'}
               </Button>
             </div>
           </form>
