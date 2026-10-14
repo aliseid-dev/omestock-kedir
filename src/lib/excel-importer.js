@@ -1,4 +1,5 @@
 import * as XLSX from 'xlsx'
+import { isOilInLiter } from './utils'
 
 /**
  * Pre-parsed items from the Kaya Yasmin Auto Parts Excel inventory spreadsheet
@@ -202,7 +203,7 @@ export const PRELOADED_KAYA_YASMIN_ITEMS = [
     "sellingPrice": 500,
     "minStockThreshold": 5,
     "storeStock": 40,
-    "defaultCommissionRate": 0.5
+    "defaultCommissionRate": 2.5
   },
   {
     "code": "SP-017",
@@ -213,7 +214,7 @@ export const PRELOADED_KAYA_YASMIN_ITEMS = [
     "sellingPrice": 450,
     "minStockThreshold": 5,
     "storeStock": 14,
-    "defaultCommissionRate": 0.5
+    "defaultCommissionRate": 2.5
   },
   {
     "code": "SP-018",
@@ -224,7 +225,7 @@ export const PRELOADED_KAYA_YASMIN_ITEMS = [
     "sellingPrice": 400,
     "minStockThreshold": 5,
     "storeStock": 6,
-    "defaultCommissionRate": 0.5
+    "defaultCommissionRate": 2.5
   },
   {
     "code": "SP-019",
@@ -235,7 +236,7 @@ export const PRELOADED_KAYA_YASMIN_ITEMS = [
     "sellingPrice": 600,
     "minStockThreshold": 5,
     "storeStock": 2,
-    "defaultCommissionRate": 0.5
+    "defaultCommissionRate": 2.5
   },
   {
     "code": "SP-020",
@@ -246,7 +247,7 @@ export const PRELOADED_KAYA_YASMIN_ITEMS = [
     "sellingPrice": 800,
     "minStockThreshold": 5,
     "storeStock": 28,
-    "defaultCommissionRate": 0.5
+    "defaultCommissionRate": 2.5
   },
   {
     "code": "SP-021",
@@ -257,7 +258,7 @@ export const PRELOADED_KAYA_YASMIN_ITEMS = [
     "sellingPrice": 500,
     "minStockThreshold": 5,
     "storeStock": 23,
-    "defaultCommissionRate": 0.5
+    "defaultCommissionRate": 2.5
   },
   {
     "code": "SP-022",
@@ -268,7 +269,7 @@ export const PRELOADED_KAYA_YASMIN_ITEMS = [
     "sellingPrice": 400,
     "minStockThreshold": 5,
     "storeStock": 2,
-    "defaultCommissionRate": 0.5
+    "defaultCommissionRate": 2.5
   },
   {
     "code": "SP-023",
@@ -279,7 +280,7 @@ export const PRELOADED_KAYA_YASMIN_ITEMS = [
     "sellingPrice": 800,
     "minStockThreshold": 5,
     "storeStock": 8,
-    "defaultCommissionRate": 0.5
+    "defaultCommissionRate": 2.5
   },
   {
     "code": "SP-024",
@@ -291,7 +292,7 @@ export const PRELOADED_KAYA_YASMIN_ITEMS = [
     "sellingPriceRange": "800-1500",
     "minStockThreshold": 5,
     "storeStock": 11,
-    "defaultCommissionRate": 0.5
+    "defaultCommissionRate": 2.5
   },
   {
     "code": "SP-025",
@@ -303,7 +304,7 @@ export const PRELOADED_KAYA_YASMIN_ITEMS = [
     "sellingPriceRange": "700-800",
     "minStockThreshold": 5,
     "storeStock": 31,
-    "defaultCommissionRate": 0.5
+    "defaultCommissionRate": 2.5
   },
   {
     "code": "SP-026",
@@ -314,7 +315,7 @@ export const PRELOADED_KAYA_YASMIN_ITEMS = [
     "sellingPrice": 600,
     "minStockThreshold": 5,
     "storeStock": 17,
-    "defaultCommissionRate": 0.5
+    "defaultCommissionRate": 2.5
   },
   {
     "code": "SP-027",
@@ -496,7 +497,7 @@ export const PRELOADED_KAYA_YASMIN_ITEMS = [
     "sellingPrice": 300,
     "minStockThreshold": 3,
     "storeStock": 9,
-    "defaultCommissionRate": 0.5
+    "defaultCommissionRate": 2.5
   },
   {
     "code": "SP-044",
@@ -518,7 +519,7 @@ export const PRELOADED_KAYA_YASMIN_ITEMS = [
     "sellingPrice": 800,
     "minStockThreshold": 5,
     "storeStock": 17,
-    "defaultCommissionRate": 0.5
+    "defaultCommissionRate": 2.5
   },
   {
     "code": "SP-046",
@@ -676,7 +677,7 @@ export const PRELOADED_KAYA_YASMIN_ITEMS = [
     "sellingPrice": 1000,
     "minStockThreshold": 4,
     "storeStock": 4,
-    "defaultCommissionRate": 0.5
+    "defaultCommissionRate": 2.5
   },
   {
     "code": "SP-060",
@@ -687,7 +688,7 @@ export const PRELOADED_KAYA_YASMIN_ITEMS = [
     "sellingPrice": 1000,
     "minStockThreshold": 5,
     "storeStock": 4,
-    "defaultCommissionRate": 0.5
+    "defaultCommissionRate": 2.5
   },
   {
     "code": "SP-061",
@@ -1091,7 +1092,7 @@ export const PRELOADED_KAYA_YASMIN_ITEMS = [
     "sellingPrice": 4500,
     "minStockThreshold": 5,
     "storeStock": 19,
-    "defaultCommissionRate": 0.5
+    "defaultCommissionRate": 2.5
   },
   {
     "code": "SP-098",
@@ -1102,7 +1103,7 @@ export const PRELOADED_KAYA_YASMIN_ITEMS = [
     "sellingPrice": 2500,
     "minStockThreshold": 5,
     "storeStock": 37,
-    "defaultCommissionRate": 0.5
+    "defaultCommissionRate": 2.5
   },
   {
     "code": "SP-099",
@@ -1113,7 +1114,7 @@ export const PRELOADED_KAYA_YASMIN_ITEMS = [
     "sellingPrice": 5700,
     "minStockThreshold": 5,
     "storeStock": 20,
-    "defaultCommissionRate": 0.5
+    "defaultCommissionRate": 2.5
   },
   {
     "code": "SP-100",
@@ -1124,7 +1125,7 @@ export const PRELOADED_KAYA_YASMIN_ITEMS = [
     "sellingPrice": 2400,
     "minStockThreshold": 5,
     "storeStock": 34,
-    "defaultCommissionRate": 0.5
+    "defaultCommissionRate": 2.5
   },
   {
     "code": "SP-101",
@@ -1135,7 +1136,7 @@ export const PRELOADED_KAYA_YASMIN_ITEMS = [
     "sellingPrice": 5000,
     "minStockThreshold": 5,
     "storeStock": 3,
-    "defaultCommissionRate": 0.5
+    "defaultCommissionRate": 2.5
   },
   {
     "code": "SP-102",
@@ -1443,7 +1444,7 @@ export const PRELOADED_KAYA_YASMIN_ITEMS = [
     "sellingPrice": 1500,
     "minStockThreshold": 3,
     "storeStock": 0,
-    "defaultCommissionRate": 0.5
+    "defaultCommissionRate": 2.5
   },
   {
     "code": "SP-130",
@@ -1764,7 +1765,7 @@ export const PRELOADED_KAYA_YASMIN_ITEMS = [
     "sellingPrice": 1000,
     "minStockThreshold": 3,
     "storeStock": 14,
-    "defaultCommissionRate": 0.5
+    "defaultCommissionRate": 2.5
   },
   {
     "code": "SP-160",
@@ -1775,7 +1776,7 @@ export const PRELOADED_KAYA_YASMIN_ITEMS = [
     "sellingPrice": 1500,
     "minStockThreshold": 3,
     "storeStock": 9,
-    "defaultCommissionRate": 0.5
+    "defaultCommissionRate": 2.5
   },
   {
     "code": "SP-161",
@@ -2340,7 +2341,7 @@ export const PRELOADED_KAYA_YASMIN_ITEMS = [
     "sellingPriceRange": "1500-2000",
     "minStockThreshold": 3,
     "storeStock": 97,
-    "defaultCommissionRate": 0.5
+    "defaultCommissionRate": 2.5
   },
   {
     "code": "SP-211",
@@ -2384,7 +2385,7 @@ export const PRELOADED_KAYA_YASMIN_ITEMS = [
     "sellingPrice": 1500,
     "minStockThreshold": 3,
     "storeStock": 8,
-    "defaultCommissionRate": 0.5
+    "defaultCommissionRate": 2.5
   },
   {
     "code": "SP-215",
@@ -2395,7 +2396,7 @@ export const PRELOADED_KAYA_YASMIN_ITEMS = [
     "sellingPrice": 1400,
     "minStockThreshold": 3,
     "storeStock": 16,
-    "defaultCommissionRate": 0.5
+    "defaultCommissionRate": 2.5
   },
   {
     "code": "SP-216",
@@ -2406,7 +2407,7 @@ export const PRELOADED_KAYA_YASMIN_ITEMS = [
     "sellingPrice": 3750,
     "minStockThreshold": 3,
     "storeStock": 17,
-    "defaultCommissionRate": 0.5
+    "defaultCommissionRate": 2.5
   },
   {
     "code": "SP-217",
@@ -2453,7 +2454,7 @@ export const PRELOADED_KAYA_YASMIN_ITEMS = [
     "sellingPriceRange": "5500-6500",
     "minStockThreshold": 3,
     "storeStock": 1,
-    "defaultCommissionRate": 0.5
+    "defaultCommissionRate": 2.5
   },
   {
     "code": "SP-221",
@@ -2645,8 +2646,7 @@ export async function parseInventoryExcel(fileOrBuffer) {
   }
 
   const finalItems = Array.from(mergedMap.values()).map((it) => {
-    const isOil = ((it.name || '') + ' ' + (it.category || '')).toLowerCase().includes('oil')
-    it.defaultCommissionRate = isOil ? 0.5 : 2.5
+    it.defaultCommissionRate = isOilInLiter(it) ? 0.5 : 2.5
     return it
   })
 

@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useMemo, useEffect, useCall
 import { useQuery, useMutation, useAction } from 'convex/react'
 import { api } from '../../convex/_generated/api'
 import { useAuth } from './AuthContext'
-import { formatCurrency, formatProductCode } from '../lib/utils'
+import { formatCurrency, formatProductCode, getDefaultCommissionRate, getProductCommissionRate, isOilInLiter } from '../lib/utils'
 
 export const SAMPLE_AUTO_PARTS = [
   { id: 'sp-001', code: 'SP-001', name: '12 KG GAS nok', category: 'Gas Cylinders', unit: 'Kg', costPrice: 2950, sellingPrice: 3500, sellingPriceRange: '3500', minStockThreshold: 2, defaultCommissionRate: 2.5 },
@@ -17,7 +17,7 @@ export const SAMPLE_AUTO_PARTS = [
   { id: 'sp-010', code: 'SP-010', name: 'Coolant 4L', category: 'Coolants & Fluids', unit: 'L', costPrice: 1100, sellingPrice: 1200, sellingPriceRange: '1200-1800', minStockThreshold: 5, defaultCommissionRate: 2.5 },
   { id: 'sp-011', code: 'SP-011', name: 'OSCAR BREAK FLUD', category: 'Brake Fluids', unit: 'Piece', costPrice: 150, sellingPrice: 300, sellingPriceRange: '300-400', minStockThreshold: 5, defaultCommissionRate: 2.5 },
   { id: 'sp-012', code: 'SP-012', name: 'Asmico break fluid 1/2', category: 'Brake Fluids', unit: 'Piece', costPrice: 450, sellingPrice: 500, sellingPriceRange: '500-700', minStockThreshold: 5, defaultCommissionRate: 2.5 },
-  { id: 'sp-016', code: 'SP-016', name: 'SDK 30002 oil filter', category: 'Oil Filters', unit: 'Piece', costPrice: 350, sellingPrice: 500, sellingPriceRange: '500-650', minStockThreshold: 5, defaultCommissionRate: 0.5 },
+  { id: 'sp-016', code: 'SP-016', name: 'SDK 30002 oil filter', category: 'Oil Filters', unit: 'Piece', costPrice: 350, sellingPrice: 500, sellingPriceRange: '500-650', minStockThreshold: 5, defaultCommissionRate: 2.5 },
   { id: 'sp-030', code: 'SP-030', name: 'Rubia 1L', category: 'Engine Oils (1L)', unit: 'L', costPrice: 1100, sellingPrice: 1200, sellingPriceRange: '1200-1500', minStockThreshold: 5, defaultCommissionRate: 0.5 },
   { id: 'sp-035', code: 'SP-035', name: 'Delo 4L', category: 'Engine Oils (4L)', unit: 'L', costPrice: 5000, sellingPrice: 5500, sellingPriceRange: '5500-6000', minStockThreshold: 3, defaultCommissionRate: 0.5 },
 ]
@@ -95,6 +95,11 @@ export function TenantProvider({ children }) {
     clientId ? { clientId } : 'skip'
   )
 
+  const commissionSettlementsData = useQuery(
+    api.commissions.getCommissionSettlements,
+    clientId ? { clientId } : 'skip'
+  )
+
   // Synchronized & Locally Persisted Commission Settlements Store
   const [localSettlements, setLocalSettlements] = useState(() => {
     try {
@@ -137,6 +142,7 @@ export function TenantProvider({ children }) {
   const recordDirectPurchaseMutation = useMutation(api.inventory.recordDirectPurchase)
   const recordSaleMutation = useMutation(api.sales.recordSale)
   const settleCreditSaleMutation = useMutation(api.sales.settleCreditSale)
+  const settleStaffCommissionMutation = useMutation(api.commissions.settleStaffCommission)
   const approveStaffMutation = useMutation(api.users.approveStaff)
   const rejectStaffMutation = useMutation(api.users.rejectStaff)
   const deleteStaffMutation = useMutation(api.users.deleteStaff)
@@ -177,21 +183,61 @@ export function TenantProvider({ children }) {
     }
   }, [clientId, normalizeLocationNamesMutation])
 
+  // Auto-sync any unsynced local settlements to Convex DB so all user devices receive the settled status
+  useEffect(() => {
+    if (!clientId || !Array.isArray(localSettlements) || localSettlements.length === 0 || !Array.isArray(salesData)) {
+      return
+    }
+
+    const unsettledConvexSales = salesData.filter((s) => !s.commissionSettled && (s.commission ?? 0) > 0)
+    if (unsettledConvexSales.length === 0) return
+
+    localSettlements.forEach(async (ls) => {
+      const saleIds = Array.isArray(ls.settledSaleIds) ? ls.settledSaleIds : []
+      const hasUnsettledInConvex = unsettledConvexSales.some(
+        (s) => saleIds.includes(s._id) || saleIds.includes(String(s._id))
+      )
+      if (hasUnsettledInConvex) {
+        try {
+          await settleStaffCommissionMutation({
+            clientId,
+            staffId: String(ls.staffId),
+            staffName: String(ls.staffName),
+            amount: parseFloat(ls.amount) || 0,
+            paymentMethod: ls.paymentMethod || 'Cash',
+            bankProvider: ls.bankProvider || undefined,
+            reference: ls.reference || undefined,
+            notes: ls.notes || undefined,
+            settledByUserId: ls.settledByUserId || 'owner',
+            settledByUserName: ls.settledByUserName || 'Owner',
+            saleIds: saleIds.map(String),
+          })
+        } catch (syncErr) {
+          console.warn('Auto-sync unsynced local settlement error:', syncErr)
+        }
+      }
+    })
+  }, [clientId, localSettlements, salesData, settleStaffCommissionMutation])
+
   // Quick switch / session state inside active organization
   const [activeStaffUser, setActiveStaffUser] = useState(null)
   const [isPasscodeLocked, setIsPasscodeLocked] = useState(false)
   const [pendingUser, setPendingUser] = useState(null)
 
-  // Format products with compatibility id field
+  // Format products with compatibility id field and standardized commission rates (0.5% for oils in liter, 2.5% default for all other items)
   const products = useMemo(() => {
     if (!inventoryData?.products) {
       return []
     }
-    return inventoryData.products.map((p) => ({
-      ...p,
-      id: p._id,
-      code: p.code ? formatProductCode(p.code) : undefined,
-    }))
+    return inventoryData.products.map((p) => {
+      const commRate = getProductCommissionRate(p)
+      return {
+        ...p,
+        id: p._id,
+        code: p.code ? formatProductCode(p.code) : undefined,
+        defaultCommissionRate: commRate,
+      }
+    })
   }, [inventoryData?.products])
 
   // Format warehouses with compatibility id field
@@ -218,19 +264,51 @@ export function TenantProvider({ children }) {
     }))
   }, [inventoryData?.stores])
 
+  // Format commission settlements history (realtime Convex sync + optimistic local fallback)
+  const commissionSettlements = useMemo(() => {
+    const list = []
+    const seen = new Set()
+
+    if (Array.isArray(commissionSettlementsData)) {
+      commissionSettlementsData.forEach((cs) => {
+        const id = String(cs._id || cs.id)
+        seen.add(id)
+        list.push({
+          ...cs,
+          id: cs._id,
+        })
+      })
+    }
+
+    if (Array.isArray(localSettlements)) {
+      localSettlements.forEach((cs) => {
+        const id = String(cs._id || cs.id)
+        if (!seen.has(id)) {
+          seen.add(id)
+          list.push(cs)
+        }
+      })
+    }
+
+    return list
+  }, [commissionSettlementsData, localSettlements])
+
   // Format sales history with complete customer debt and commission settlement fields
   const sales = useMemo(() => {
     if (!salesData) return []
-    // Build set of settled sale IDs from localSettlements
+    // Build set of settled sale IDs from commission settlements
     const settledIdsSet = new Set()
-    localSettlements.forEach((cs) => {
+    commissionSettlements.forEach((cs) => {
       if (Array.isArray(cs.settledSaleIds)) {
-        cs.settledSaleIds.forEach((id) => settledIdsSet.add(id))
+        cs.settledSaleIds.forEach((id) => settledIdsSet.add(String(id)))
       }
     })
 
     return salesData.map((s) => {
-      const isSettled = Boolean(s.commissionSettled) || settledIdsSet.has(s._id) || settledIdsSet.has(s.id)
+      const isSettled =
+        Boolean(s.commissionSettled) ||
+        settledIdsSet.has(String(s._id)) ||
+        settledIdsSet.has(String(s.id))
       return {
         ...s,
         id: s._id,
@@ -248,10 +326,7 @@ export function TenantProvider({ children }) {
         timestamp: s.createdAt,
       }
     })
-  }, [salesData, localSettlements])
-
-  // Format commission settlements history
-  const commissionSettlements = localSettlements
+  }, [salesData, commissionSettlements])
 
   // Format staff list
   const staff = useMemo(() => {
@@ -365,7 +440,7 @@ export function TenantProvider({ children }) {
         defaultCommissionRate:
           productData.defaultCommissionRate !== undefined && productData.defaultCommissionRate !== ''
             ? parseFloat(productData.defaultCommissionRate)
-            : ((productData.name + ' ' + (productData.category || '')).toLowerCase().includes('oil') ? 0.5 : 2.5),
+            : getDefaultCommissionRate(productData),
         minStockThreshold: parseInt(productData.minStockThreshold, 10) || 5,
         notes: productData.notes?.trim() || undefined,
         initialWarehouseId: productData.initialWarehouseId || undefined,
@@ -1072,20 +1147,53 @@ export function TenantProvider({ children }) {
         }
       }
 
-      const targetId = typeof staffMemberOrId === 'string' ? staffMemberOrId : (staffMemberOrId.id || staffMemberOrId._id || staffMemberOrId.userId)
-      const targetUserId = typeof staffMemberOrId === 'object' ? staffMemberOrId.userId : null
-      const targetName = typeof staffMemberOrId === 'object' ? staffMemberOrId.name : null
+      // Check if we can find associated staff member in the staff list
+      const staffMember =
+        typeof staffMemberOrId === 'object'
+          ? staffMemberOrId
+          : staff.find(
+              (st) =>
+                st.id === staffMemberOrId ||
+                st._id === staffMemberOrId ||
+                st.userId === staffMemberOrId
+            )
+
+      const candidateIds = new Set()
+      if (typeof staffMemberOrId === 'string') {
+        candidateIds.add(staffMemberOrId)
+      } else if (staffMemberOrId) {
+        if (staffMemberOrId.id) candidateIds.add(String(staffMemberOrId.id))
+        if (staffMemberOrId._id) candidateIds.add(String(staffMemberOrId._id))
+        if (staffMemberOrId.userId) candidateIds.add(String(staffMemberOrId.userId))
+      }
+      if (staffMember) {
+        if (staffMember.id) candidateIds.add(String(staffMember.id))
+        if (staffMember._id) candidateIds.add(String(staffMember._id))
+        if (staffMember.userId) candidateIds.add(String(staffMember.userId))
+      }
+
+      const candidateNames = new Set()
+      if (typeof staffMemberOrId === 'object' && staffMemberOrId?.name) {
+        candidateNames.add(staffMemberOrId.name.trim().toLowerCase())
+      }
+      if (staffMember?.name) {
+        candidateNames.add(staffMember.name.trim().toLowerCase())
+      }
 
       const matchingSales = sales.filter((s) => {
+        const sSalespersonId = s.salespersonId ? String(s.salespersonId) : null
+        const sStaffId = s.staffId ? String(s.staffId) : null
         const idMatch =
-          (s.salespersonId && (s.salespersonId === targetId || (targetUserId && s.salespersonId === targetUserId))) ||
-          (s.staffId && (s.staffId === targetId || (targetUserId && s.staffId === targetUserId)))
-        const nameMatch = Boolean(
-          targetName &&
-          ((s.salespersonName && s.salespersonName.toLowerCase() === targetName.toLowerCase()) ||
-           (s.staffName && s.staffName.toLowerCase() === targetName.toLowerCase()))
-        )
-        return idMatch || nameMatch
+          (sSalespersonId && candidateIds.has(sSalespersonId)) ||
+          (sStaffId && candidateIds.has(sStaffId))
+
+        const sSalespersonName = s.salespersonName ? s.salespersonName.trim().toLowerCase() : ''
+        const sStaffName = s.staffName ? s.staffName.trim().toLowerCase() : ''
+        const nameMatch =
+          (sSalespersonName && candidateNames.has(sSalespersonName)) ||
+          (sStaffName && candidateNames.has(sStaffName))
+
+        return Boolean(idMatch || nameMatch)
       })
 
       const unsettledSales = matchingSales.filter(
@@ -1097,11 +1205,11 @@ export function TenantProvider({ children }) {
       )
 
       const matchingSettlements = commissionSettlements.filter((cs) => {
-        const idMatch = cs.staffId === targetId || (targetUserId && cs.staffId === targetUserId)
-        const nameMatch = Boolean(
-          targetName && cs.staffName && cs.staffName.toLowerCase() === targetName.toLowerCase()
-        )
-        return idMatch || nameMatch
+        const csStaffId = cs.staffId ? String(cs.staffId) : null
+        const idMatch = csStaffId && candidateIds.has(csStaffId)
+        const csStaffName = cs.staffName ? cs.staffName.trim().toLowerCase() : ''
+        const nameMatch = csStaffName && candidateNames.has(csStaffName)
+        return Boolean(idMatch || nameMatch)
       })
       const settledAmount = matchingSettlements.reduce((sum, cs) => sum + (cs.amount || 0), 0)
 
@@ -1113,7 +1221,7 @@ export function TenantProvider({ children }) {
         totalEarned: unsettledAmount + settledAmount,
       }
     },
-    [sales, commissionSettlements]
+    [sales, commissionSettlements, staff]
   )
 
   const currentUserCommissionStats = useMemo(() => {
@@ -1140,9 +1248,35 @@ export function TenantProvider({ children }) {
   }) => {
     try {
       const targetStats = getStaffCommissionStats({ id: staffId, name: staffName })
-      const unsettledSaleIds = (targetStats?.unsettledSales || []).map((s) => s.id || s._id)
+      const unsettledSaleIds = (targetStats?.unsettledSales || []).map((s) => String(s.id || s._id))
 
-      const settlementId = `cset_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
+      let settlementId = `cset_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
+
+      // 1. Persist directly to Convex database (updates sales to commissionSettled: true and inserts commissionSettlements record)
+      if (clientId) {
+        try {
+          const res = await settleStaffCommissionMutation({
+            clientId,
+            staffId: String(staffId),
+            staffName: String(staffName),
+            amount: parseFloat(amount) || 0,
+            paymentMethod,
+            bankProvider: bankProvider || undefined,
+            reference: reference || undefined,
+            notes: notes || undefined,
+            settledByUserId: currentUser?.id || 'owner',
+            settledByUserName: currentUser?.name || 'Owner',
+            saleIds: unsettledSaleIds,
+          })
+          if (res?.settlementId) {
+            settlementId = String(res.settlementId)
+          }
+        } catch (convexErr) {
+          console.warn('Convex settleStaffCommissionMutation warning:', convexErr)
+        }
+      }
+
+      // 2. Also record in local state and localStorage for instant zero-latency optimistic feedback
       const newSettlement = {
         id: settlementId,
         _id: settlementId,

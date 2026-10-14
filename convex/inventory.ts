@@ -109,6 +109,99 @@ export const normalizeLocationNames = mutation({
   },
 });
 
+// Helper to determine if a product is an engine/motor/gear oil sold in liters
+export function isOilInLiterProduct(name?: string, category?: string, unit?: string): boolean {
+  if (!name && !category) return false;
+  const n = (name || "").toLowerCase();
+  const c = (category || "").toLowerCase();
+  const u = (unit || "").toLowerCase().trim();
+  const combined = `${n} ${c}`;
+
+  // Explicit non-oil parts, accessories, filters, gas equipment & additives
+  if (
+    combined.includes("filter") ||
+    combined.includes("gas") ||
+    combined.includes("cylinder") ||
+    combined.includes("regulator") ||
+    combined.includes("reguleter") ||
+    combined.includes("gulcha") ||
+    combined.includes("bushing") ||
+    combined.includes("brake shoe") ||
+    combined.includes("break shoe") ||
+    combined.includes("disc") ||
+    combined.includes("hose") ||
+    combined.includes("battery") ||
+    combined.includes("badoeka") ||
+    combined.includes("treatment") ||
+    combined.includes("additive") ||
+    combined.includes("seal") ||
+    combined.includes("pump") ||
+    combined.includes("pan") ||
+    combined.includes("gasket") ||
+    combined.includes("plug") ||
+    combined.includes("gris") ||
+    combined.includes("grease")
+  ) {
+    return false;
+  }
+
+  // Brake fluids
+  if (
+    combined.includes("brake fluid") ||
+    combined.includes("break fluid") ||
+    combined.includes("dot 4") ||
+    combined.includes("dot4")
+  ) {
+    return false;
+  }
+
+  // Must be recognized as an oil
+  const isOil =
+    combined.includes("oil") ||
+    combined.includes("rubia") ||
+    combined.includes("delo") ||
+    combined.includes("havoline") ||
+    combined.includes("quartz") ||
+    combined.includes("zoble") ||
+    combined.includes("gulf") ||
+    combined.includes("deomax") ||
+    combined.includes("deo max") ||
+    combined.includes("elell") ||
+    combined.includes("veedol") ||
+    combined.includes("castrol") ||
+    combined.includes("kobil") ||
+    combined.includes("quatol") ||
+    combined.includes("benzon") ||
+    combined.includes("delta") ||
+    combined.includes("oscar 4l") ||
+    combined.includes("oscar 68") ||
+    combined.includes("sin guif") ||
+    combined.includes("lubricant") ||
+    /\b\d+w-?\d+\b/i.test(n);
+
+  if (!isOil) return false;
+
+  if (n.includes("kg") && !n.includes("oil") && !n.includes("gag")) {
+    return false;
+  }
+
+  const isLiterUnit =
+    u === "l" ||
+    u === "lt" ||
+    u === "liter" ||
+    u === "litre" ||
+    u === "liters" ||
+    u === "litres" ||
+    u === "ll";
+
+  const hasLiterInNameOrCategory =
+    /\b\d+(\.\d+)?\s*(l|lt|liter|litre|liters|litres)\b/i.test(n) ||
+    /\b\d+(\.\d+)?\s*(l|lt|liter|litre|liters|litres)\b/i.test(c) ||
+    /(\d+l)\b/i.test(n);
+
+  return isLiterUnit || hasLiterInNameOrCategory;
+}
+
 // Create a new product in the catalog and initialize stock to 0 in all locations
 export const createProduct = mutation({
   args: {
@@ -131,7 +224,7 @@ export const createProduct = mutation({
   },
   handler: async (ctx, args) => {
     const now = new Date().toISOString();
-    const isOil = (args.name + " " + (args.category || "")).toLowerCase().includes("oil");
+    const isOil = isOilInLiterProduct(args.name, args.category, args.unit);
     const defaultComm = isOil ? 0.5 : 2.5;
 
     const productId = await ctx.db.insert("products", {
@@ -274,7 +367,7 @@ export const seedSampleInventory = mutation({
           minStockThreshold: item.minStockThreshold,
         });
       } else {
-        const isOil = (item.name + " " + item.category).toLowerCase().includes("oil");
+        const isOil = isOilInLiterProduct(item.name, item.category, item.unit);
         prodId = await ctx.db.insert("products", {
           clientId: args.clientId,
           name: item.name,
@@ -648,7 +741,7 @@ export const bulkImportInventory = mutation({
           p.name.toLowerCase() === trimmedName.toLowerCase()
       );
 
-      const isOil = (trimmedName + " " + (item.category || "")).toLowerCase().includes("oil");
+      const isOil = isOilInLiterProduct(trimmedName, item.category, item.unit);
       const defaultCommission =
         item.defaultCommissionRate !== undefined
           ? item.defaultCommissionRate
@@ -738,5 +831,31 @@ export const getActiveClient = query({
     return await ctx.db.query("clients").order("desc").first();
   },
 });
+
+// Update all existing products to standard commission rates:
+// 0.5% for oils in liter, and 2.5% for all other products.
+export const updateAllProductCommissionRates = mutation({
+  args: {
+    clientId: v.id("clients"),
+  },
+  handler: async (ctx, args) => {
+    const products = await ctx.db
+      .query("products")
+      .withIndex("by_clientId", (q) => q.eq("clientId", args.clientId))
+      .collect();
+
+    let updatedCount = 0;
+    for (const p of products) {
+      const isOil = isOilInLiterProduct(p.name, p.category, p.unit);
+      const targetRate = isOil ? 0.5 : 2.5;
+      if (p.defaultCommissionRate !== targetRate) {
+        await ctx.db.patch(p._id, { defaultCommissionRate: targetRate });
+        updatedCount++;
+      }
+    }
+    return { success: true, updatedCount, totalProducts: products.length };
+  },
+});
+
 
 

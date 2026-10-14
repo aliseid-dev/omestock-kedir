@@ -53,7 +53,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'
 import { Badge } from '../components/ui/Badge'
 import { Modal } from '../components/ui/Modal'
-import { formatCurrency, formatProductCode, extractProductCodeDigits, matchesProductSearch } from '../lib/utils'
+import { formatCurrency, formatProductCode, extractProductCodeDigits, matchesProductSearch, getDefaultCommissionRate, getProductCommissionRate, isOilInLiter } from '../lib/utils'
 import { ETHIOPIAN_PAYMENT_PROVIDERS, DEFAULT_BANK } from '../lib/ethiopian-banks'
 import { parseInventoryExcel, PRELOADED_KAYA_YASMIN_ITEMS } from '../lib/excel-importer'
 
@@ -1058,7 +1058,7 @@ export function InventoryPage() {
     initialQuantity: 0,
     sellingPrice: products[0]?.sellingPrice || 0,
     costPrice: products[0]?.costPrice || 0,
-    defaultCommissionRate: products[0]?.defaultCommissionRate || 5,
+    defaultCommissionRate: products[0] ? getProductCommissionRate(products[0]) : '2.5',
     minStockThreshold: products[0]?.minStockThreshold || 3,
   })
 
@@ -1249,7 +1249,6 @@ export function InventoryPage() {
       }
 
       // Owner direct addition
-      const isOil = (trimmedName + ' ' + category).toLowerCase().includes('oil')
       const created = await createProduct({
         code: trimmedCode,
         name: trimmedName,
@@ -1257,7 +1256,7 @@ export function InventoryPage() {
         unit: unit,
         sellingPrice: warehouseAddProductForm.sellingPrice,
         costPrice: warehouseAddProductForm.costPrice,
-        defaultCommissionRate: isOil ? 0.5 : 2.5,
+        defaultCommissionRate: getDefaultCommissionRate({ name: trimmedName, category, unit }),
         minStockThreshold: warehouseAddProductForm.minStockThreshold,
         initialWarehouseId: activeLocation.id,
         initialQuantity: qty,
@@ -1340,7 +1339,6 @@ export function InventoryPage() {
           targetProductName = existing.name
           targetProductUnit = existing.unit || unit || 'Piece'
         } else {
-          const isOil = (trimmedName + ' ' + (newProductCategory || '')).toLowerCase().includes('oil')
           const created = await createProduct({
             code: trimmedCode,
             name: trimmedName,
@@ -1348,7 +1346,7 @@ export function InventoryPage() {
             unit: unit || 'Piece',
             sellingPrice: newProductSellingPrice || '30',
             costPrice: costPerUnit || '20',
-            defaultCommissionRate: isOil ? 0.5 : 2.5,
+            defaultCommissionRate: getDefaultCommissionRate({ name: trimmedName, category: newProductCategory, unit }),
             minStockThreshold: 5,
           }, currentUser)
           if (!created) {
@@ -1620,7 +1618,6 @@ export function InventoryPage() {
       }
 
       // Owner direct addition
-      const isOil = (trimmedName + ' ' + category).toLowerCase().includes('oil')
       const created = await createProduct({
         code: trimmedCode,
         name: trimmedName,
@@ -1628,7 +1625,7 @@ export function InventoryPage() {
         unit: unit,
         sellingPrice: storeAddProductForm.sellingPrice,
         costPrice: storeAddProductForm.costPrice,
-        defaultCommissionRate: isOil ? 0.5 : 2.5,
+        defaultCommissionRate: getDefaultCommissionRate({ name: trimmedName, category, unit }),
         minStockThreshold: storeAddProductForm.minStockThreshold,
         initialStoreId: activeLocation.id,
         initialQuantity: qty,
@@ -1710,7 +1707,6 @@ export function InventoryPage() {
           targetProductName = existing.name
           targetProductUnit = existing.unit || unit || 'Piece'
         } else {
-          const isOil = (trimmedName + ' ' + (newProductCategory || '')).toLowerCase().includes('oil')
           const created = await createProduct({
             code: trimmedCode,
             name: trimmedName,
@@ -1718,7 +1714,7 @@ export function InventoryPage() {
             unit: unit || 'Piece',
             sellingPrice: newProductSellingPrice || '30',
             costPrice: costPerUnit || '20',
-            defaultCommissionRate: isOil ? 0.5 : 2.5,
+            defaultCommissionRate: getDefaultCommissionRate({ name: trimmedName, category: newProductCategory, unit }),
             minStockThreshold: 5,
           }, currentUser)
           if (!created) {
@@ -1939,7 +1935,6 @@ export function InventoryPage() {
             return
           }
           const formattedCode = `SP-${numericCode}`
-          const isOil = ((it.newProductName || '') + ' ' + (it.newProductCategory || '')).toLowerCase().includes('oil')
           const created = await createProduct({
             code: formattedCode,
             name: it.newProductName.trim(),
@@ -1947,7 +1942,7 @@ export function InventoryPage() {
             unit: it.unit || 'Piece',
             sellingPrice: it.newProductSellingPrice || '30',
             costPrice: it.costPerUnit || '20',
-            defaultCommissionRate: isOil ? 0.5 : 2.5,
+            defaultCommissionRate: getDefaultCommissionRate({ name: it.newProductName, category: it.newProductCategory, unit: it.unit }),
             minStockThreshold: 10,
           }, currentUser)
           if (!created) {
@@ -2064,7 +2059,6 @@ export function InventoryPage() {
         return
       }
       const formattedCode = `SP-${numericCode}`
-      const isOil = ((purchaseForm.newProductName || '') + ' ' + (purchaseForm.newProductCategory || '')).toLowerCase().includes('oil')
       const created = await createProduct({
         code: formattedCode,
         name: purchaseForm.newProductName.trim(),
@@ -2072,7 +2066,7 @@ export function InventoryPage() {
         unit: purchaseForm.unit || 'Piece',
         sellingPrice: purchaseForm.newProductSellingPrice,
         costPrice: purchaseForm.newProductCostPrice,
-        defaultCommissionRate: isOil ? 0.5 : 2.5,
+        defaultCommissionRate: getDefaultCommissionRate({ name: purchaseForm.newProductName, category: purchaseForm.newProductCategory, unit: purchaseForm.unit }),
         minStockThreshold: purchaseForm.newProductMinThreshold || 5,
       }, currentUser)
       if (!created) {
@@ -2172,10 +2166,9 @@ export function InventoryPage() {
       return
     }
     const trimmedCode = `SP-${numericCode}`
-    const isOil = ((standaloneProductForm.name || '') + ' ' + (standaloneProductForm.category || '')).toLowerCase().includes('oil')
     const commissionRate = standaloneProductForm.defaultCommissionRate !== undefined && standaloneProductForm.defaultCommissionRate !== ''
       ? parseFloat(standaloneProductForm.defaultCommissionRate)
-      : (isOil ? 0.5 : 2.5)
+      : getDefaultCommissionRate(standaloneProductForm)
 
     const created = await createProduct({
       code: trimmedCode,
@@ -2280,7 +2273,7 @@ export function InventoryPage() {
       category: 'General',
       sellingPrice: '30',
       costPrice: '20',
-      defaultCommissionRate: '5',
+      defaultCommissionRate: '2.5',
       minStockThreshold: '10',
       initialDestination: 'none',
       initialDestinationId: '',
@@ -2325,7 +2318,7 @@ export function InventoryPage() {
         initialQuantity: curStock,
         sellingPrice: target.sellingPrice ?? '',
         costPrice: target.costPrice ?? 0,
-        defaultCommissionRate: target.defaultCommissionRate || 5,
+        defaultCommissionRate: getProductCommissionRate(target),
         minStockThreshold: target.minStockThreshold || 3,
       })
     }
@@ -2346,7 +2339,7 @@ export function InventoryPage() {
       initialQuantity: curStock,
       sellingPrice: p.sellingPrice ?? '',
       costPrice: p.costPrice ?? 0,
-      defaultCommissionRate: p.defaultCommissionRate || 5,
+      defaultCommissionRate: getProductCommissionRate(p),
       minStockThreshold: p.minStockThreshold || 3,
     })
   }
@@ -3078,7 +3071,7 @@ export function InventoryPage() {
                         <span className="text-[10px] text-slate-400">Quick presets:</span>
                       </div>
                       <div className="flex items-center gap-1.5 mb-2">
-                        {[2, 5, 7.5, 10, 15].map(rate => (
+                        {[0.5, 2.5, 5, 7.5, 10].map(rate => (
                           <button
                             key={rate}
                             type="button"
@@ -4433,7 +4426,7 @@ export function InventoryPage() {
               <div>
                 <p className="font-bold">Review & Approval</p>
                 <p className="text-[11px] text-blue-700 mt-0.5">
-                  An instant notification with the item details, quantity, and prices is sent to the Owner for verification and approval.
+                  An instant notification with the item details, quantity, and prices is sent verification and approval.
                 </p>
               </div>
             </div>

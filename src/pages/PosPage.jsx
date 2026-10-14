@@ -31,16 +31,10 @@ import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'
 import { Badge } from '../components/ui/Badge'
 import { Modal } from '../components/ui/Modal'
-import { formatCurrency, formatProductCode, matchesProductSearch } from '../lib/utils'
+import { formatCurrency, formatProductCode, matchesProductSearch, getProductCommissionRate, getDefaultCommissionRate, isOilInLiter } from '../lib/utils'
 import { ETHIOPIAN_PAYMENT_PROVIDERS, DEFAULT_BANK } from '../lib/ethiopian-banks'
 
-export const getProductCommissionRate = (product) => {
-  if (product?.defaultCommissionRate !== undefined && product?.defaultCommissionRate !== null) {
-    return product.defaultCommissionRate
-  }
-  const isOil = ((product?.name || '') + ' ' + (product?.category || '')).toLowerCase().includes('oil')
-  return isOil ? 0.5 : 2.5
-}
+export { getProductCommissionRate }
 
 export function PosPage() {
   const { stores, warehouses, products, staff, recordSale, currentUserCommissionStats } = useTenant()
@@ -174,7 +168,8 @@ export function PosPage() {
         if (item.product.id === product.id) {
           const newQty = item.quantity + 1
           const unitPrice = item.customPrice !== undefined && !isNaN(item.customPrice) ? item.customPrice : (product.sellingPrice || 0)
-          const commissionAmount = (unitPrice * newQty * (product.defaultCommissionRate || 5)) / 100
+          const commRate = getProductCommissionRate(product)
+          const commissionAmount = (unitPrice * newQty * commRate) / 100
           return { ...item, quantity: newQty, commissionAmount }
         }
         return item
@@ -359,7 +354,7 @@ export function PosPage() {
                       <p className="font-bold text-slate-900 line-clamp-1">{product.name}</p>
                     </div>
                     <p className="text-[11px] text-slate-500 mt-0.5">
-                      Comm ({product.defaultCommissionRate || 5}%): +{formatCurrency(commissionAmount)}
+                      Comm ({getProductCommissionRate(product)}%): +{formatCurrency(commissionAmount)}
                     </p>
                   </div>
                   <button
@@ -626,7 +621,7 @@ export function PosPage() {
               </span>
             ) : (
               <span className="font-semibold text-slate-400 text-[11px]">
-                No commissions earned yet
+                0
               </span>
             )}
           </button>

@@ -1,5 +1,6 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import { isOilInLiterProduct } from "./inventory";
 
 // Create a new transfer or direct purchase approval request
 export const createApprovalRequest = mutation({
@@ -350,16 +351,25 @@ export const approveRequest = mutation({
 
         const nameToCheck = (matchedProd?.name || item.productName || "");
         const categoryToCheck = (matchedProd?.category || "");
-        const isOil = (nameToCheck + " " + categoryToCheck).toLowerCase().includes("oil");
+        const isOil = isOilInLiterProduct(nameToCheck, categoryToCheck, unit);
         const defaultCommission = isOil ? 0.5 : 2.5;
 
         if (matchedProd) {
+          let commRate = matchedProd.defaultCommissionRate;
+          if (commRate === undefined || commRate === null) {
+            commRate = defaultCommission;
+          } else if (commRate === 0.5 && !isOil) {
+            commRate = 2.5;
+          } else if (commRate === 5) {
+            commRate = 2.5;
+          }
+
           await ctx.db.patch(matchedProd._id, {
             sellingPrice,
             minStockThreshold,
             costPrice: 0,
             unit,
-            defaultCommissionRate: matchedProd.defaultCommissionRate !== undefined ? matchedProd.defaultCommissionRate : defaultCommission,
+            defaultCommissionRate: commRate,
           });
           prodKey = matchedProd._id;
         } else if (request.clientId && item.productName) {

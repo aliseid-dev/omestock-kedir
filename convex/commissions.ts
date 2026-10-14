@@ -26,6 +26,7 @@ export const settleStaffCommission = mutation({
     notes: v.optional(v.string()),
     settledByUserId: v.string(),
     settledByUserName: v.string(),
+    saleIds: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {
     const allSales = await ctx.db
@@ -33,14 +34,45 @@ export const settleStaffCommission = mutation({
       .withIndex("by_clientId", (q) => q.eq("clientId", args.clientId))
       .collect();
 
+    // Resolve user to find all associated IDs (Convex _id, Clerk userId, staffName)
+    const user = await ctx.db
+      .query("users")
+      .filter((q) =>
+        q.or(
+          q.eq(q.field("_id"), args.staffId as any),
+          q.eq(q.field("userId"), args.staffId),
+          q.eq(q.field("name"), args.staffName)
+        )
+      )
+      .first();
+
+    const staffIdSet = new Set<string>([args.staffId]);
+    if (user) {
+      if (user._id) staffIdSet.add(String(user._id));
+      if (user.userId) staffIdSet.add(String(user.userId));
+    }
+    const targetName = (args.staffName || user?.name || "").trim().toLowerCase();
+
+    // If explicit saleIds are provided, match by those sale IDs too
+    const explicitSaleIdSet = args.saleIds && args.saleIds.length > 0
+      ? new Set(args.saleIds.map(String))
+      : null;
+
     // Find all unsettled sales for this staff member
     const salesToSettle = allSales.filter((s) => {
-      const isStaffMatch =
-        s.staffId === args.staffId ||
-        (s.staffName && args.staffName && s.staffName.toLowerCase() === args.staffName.toLowerCase());
-      const hasCommission = (s.commission ?? 0) > 0;
-      const isUnsettled = !s.commissionSettled;
-      return isStaffMatch && hasCommission && isUnsettled;
+      if (s.commissionSettled) return false;
+      const commissionVal = s.commission ?? 0;
+      if (commissionVal <= 0) return false;
+
+      if (explicitSaleIdSet && (explicitSaleIdSet.has(String(s._id)) || explicitSaleIdSet.has(s._id as any))) {
+        return true;
+      }
+
+      const idMatch = s.staffId && staffIdSet.has(s.staffId);
+      const nameMatch = Boolean(
+        targetName && s.staffName && s.staffName.trim().toLowerCase() === targetName
+      );
+      return idMatch || nameMatch;
     });
 
     const now = new Date().toISOString();
@@ -71,17 +103,6 @@ export const settleStaffCommission = mutation({
     }
 
     // Update user record if exists
-    const user = await ctx.db
-      .query("users")
-      .filter((q) =>
-        q.or(
-          q.eq(q.field("_id"), args.staffId as any),
-          q.eq(q.field("userId"), args.staffId),
-          q.eq(q.field("name"), args.staffName)
-        )
-      )
-      .first();
-
     if (user) {
       const prevTotal = user.totalCommissionSettled || 0;
       await ctx.db.patch(user._id, {

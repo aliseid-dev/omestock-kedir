@@ -149,3 +149,133 @@ export function matchesProductSearch(product, rawQuery) {
   return false
 }
 
+/**
+ * Determines whether a product is an oil sold in liters (e.g. engine/motor/gear oil in 1L, 4L, 5L, 20L, etc.).
+ * Excludes filters, auto parts, gas cylinders, greases, brake fluids, additives, and items not in liters.
+ */
+export function isOilInLiter(product) {
+  if (!product) return false
+  const name = (product.name || '').toLowerCase()
+  const category = (product.category || '').toLowerCase()
+  const unit = (product.unit || '').toLowerCase().trim()
+  const combined = `${name} ${category}`
+
+  // Explicit non-oil parts, accessories, filters, gas equipment & additives
+  if (
+    combined.includes('filter') ||
+    combined.includes('gas') ||
+    combined.includes('cylinder') ||
+    combined.includes('regulator') ||
+    combined.includes('reguleter') ||
+    combined.includes('gulcha') ||
+    combined.includes('bushing') ||
+    combined.includes('brake shoe') ||
+    combined.includes('break shoe') ||
+    combined.includes('disc') ||
+    combined.includes('hose') ||
+    combined.includes('battery') ||
+    combined.includes('badoeka') ||
+    combined.includes('treatment') ||
+    combined.includes('additive') ||
+    combined.includes('seal') ||
+    combined.includes('pump') ||
+    combined.includes('pan') ||
+    combined.includes('gasket') ||
+    combined.includes('plug') ||
+    combined.includes('gris') ||
+    combined.includes('grease')
+  ) {
+    return false
+  }
+
+  // Brake fluids are hydraulic brake fluids, not engine/motor/gear oils
+  if (
+    combined.includes('brake fluid') ||
+    combined.includes('break fluid') ||
+    combined.includes('dot 4') ||
+    combined.includes('dot4')
+  ) {
+    return false
+  }
+
+  // Must be recognized as an oil
+  const isOil =
+    combined.includes('oil') ||
+    combined.includes('rubia') ||
+    combined.includes('delo') ||
+    combined.includes('havoline') ||
+    combined.includes('quartz') ||
+    combined.includes('zoble') ||
+    combined.includes('gulf') ||
+    combined.includes('deomax') ||
+    combined.includes('deo max') ||
+    combined.includes('elell') ||
+    combined.includes('veedol') ||
+    combined.includes('castrol') ||
+    combined.includes('kobil') ||
+    combined.includes('quatol') ||
+    combined.includes('benzon') ||
+    combined.includes('delta') ||
+    combined.includes('oscar 4l') ||
+    combined.includes('oscar 68') ||
+    combined.includes('sin guif') ||
+    combined.includes('lubricant') ||
+    /\b\d+w-?\d+\b/i.test(name) // e.g. 15W-40, 20W-50
+
+  if (!isOil) return false
+
+  // Gas/weight indicators like "3 kg" without oil in name are excluded
+  if (name.includes('kg') && !name.includes('oil') && !name.includes('gag')) {
+    return false
+  }
+
+  // Must be in liter
+  const isLiterUnit =
+    unit === 'l' ||
+    unit === 'lt' ||
+    unit === 'liter' ||
+    unit === 'litre' ||
+    unit === 'liters' ||
+    unit === 'litres' ||
+    unit === 'll'
+
+  const hasLiterInNameOrCategory =
+    /\b\d+(\.\d+)?\s*(l|lt|liter|litre|liters|litres)\b/i.test(name) ||
+    /\b\d+(\.\d+)?\s*(l|lt|liter|litre|liters|litres)\b/i.test(category) ||
+    /(\d+l)\b/i.test(name)
+
+  return isLiterUnit || hasLiterInNameOrCategory
+}
+
+/**
+ * Returns default commission rate: 0.5% for oils in liter, and 2.5% for all other items.
+ */
+export function getDefaultCommissionRate(product) {
+  return isOilInLiter(product) ? 0.5 : 2.5
+}
+
+/**
+ * Returns the effective product commission rate.
+ * Auto-corrects legacy 0.5% on non-oil products and legacy 5% defaults to 2.5%.
+ */
+export function getProductCommissionRate(product) {
+  if (
+    product?.defaultCommissionRate !== undefined &&
+    product?.defaultCommissionRate !== null &&
+    !isNaN(Number(product.defaultCommissionRate))
+  ) {
+    const rate = Number(product.defaultCommissionRate)
+    // If set to 0.5% but not an oil in liter (e.g. legacy oil filter misclassification), fix to 2.5%
+    if (rate === 0.5 && !isOilInLiter(product)) {
+      return 2.5
+    }
+    // If set to legacy 5%, fix to new default 2.5%
+    if (rate === 5) {
+      return 2.5
+    }
+    return rate
+  }
+  return getDefaultCommissionRate(product)
+}
+
+
