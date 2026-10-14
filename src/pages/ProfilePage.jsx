@@ -18,7 +18,11 @@ import {
   Trash2,
   AlertTriangle,
   RotateCcw,
-  Lock
+  Lock,
+  Coins,
+  Wallet,
+  Receipt,
+  History
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { useTenant } from '../context/TenantContext'
@@ -26,6 +30,7 @@ import { useToast } from '../context/ToastContext'
 import { Button } from '../components/ui/Button'
 import { Badge } from '../components/ui/Badge'
 import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card'
+import { formatCurrency } from '../lib/utils'
 
 export function ProfilePage() {
   const { toast } = useToast()
@@ -46,7 +51,8 @@ export function ProfilePage() {
     clearActiveOrganization,
     clearDatabaseData,
     wipeAndResetAccount,
-    deleteAccount
+    deleteAccount,
+    currentUserCommissionStats,
   } = useTenant()
 
   // Display Name editing
@@ -212,8 +218,8 @@ export function ProfilePage() {
             <h2 className="text-xl sm:text-2xl font-black text-slate-900">
               {displayName || 'User'}
             </h2>
-            <Badge variant={isOwner ? 'purple' : 'info'} className="text-xs px-2.5 py-0.5 font-bold">
-              {isOwner ? 'Business Owner / Admin' : 'Salesperson'}
+            <Badge variant={currentUser?.role === 'owner' ? 'purple' : currentUser?.role === 'admin' ? 'info' : 'default'} className="text-xs px-2.5 py-0.5 font-bold">
+              {currentUser?.role === 'owner' ? '👑 Business Owner' : currentUser?.role === 'admin' ? '⚡ Administrator' : '👤 Salesperson'}
             </Badge>
           </div>
 
@@ -373,6 +379,96 @@ export function ProfilePage() {
         </Card>
 
       </div>
+
+      {/* Commission & Earnings Card */}
+      <Card className="rounded-3xl border border-slate-200 shadow-xs overflow-hidden">
+        <CardHeader className="pb-3 border-b border-slate-100 flex flex-row items-center justify-between">
+          <CardTitle className="text-sm font-bold text-slate-900 flex items-center gap-2">
+            <Coins className="w-4 h-4 text-emerald-600" />
+            My Commission & Earnings
+          </CardTitle>
+          <Badge variant="purple" className="text-[10px] font-bold">
+            {currentUser?.role === 'owner' ? '👑 Owner Account' : '👤 Sales Staff'}
+          </Badge>
+        </CardHeader>
+        <CardContent className="pt-4 space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {/* Pending Payout */}
+            <div className="p-3.5 bg-emerald-50/60 rounded-2xl border border-emerald-200/80">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-800 block">
+                Pending Unsettled Commission
+              </span>
+              <span className="text-xl font-black text-emerald-950 mt-1 block">
+                {formatCurrency(currentUserCommissionStats?.unsettledAmount || 0)}
+              </span>
+              <p className="text-[11px] text-emerald-700 mt-0.5">
+                {(currentUserCommissionStats?.unsettledAmount || 0) === 0
+                  ? 'No commissions earned yet'
+                  : `Accumulated across ${currentUserCommissionStats?.unsettledSales?.length || 0} sales`}
+              </p>
+            </div>
+
+            {/* Total Settled */}
+            <div className="p-3.5 bg-purple-50/60 rounded-2xl border border-purple-200/80">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-purple-800 block">
+                Total Settled & Paid Out
+              </span>
+              <span className="text-xl font-black text-purple-950 mt-1 block">
+                {formatCurrency(currentUserCommissionStats?.settledAmount || 0)}
+              </span>
+              <p className="text-[11px] text-purple-700 mt-0.5">
+                {currentUserCommissionStats?.settlements?.length || 0} past payouts completed
+              </p>
+            </div>
+
+            {/* Total Earned */}
+            <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block">
+                Career Total Earned
+              </span>
+              <span className="text-xl font-black text-slate-900 mt-1 block">
+                {formatCurrency(currentUserCommissionStats?.totalEarned || 0)}
+              </span>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                All-time commission earnings
+              </p>
+            </div>
+          </div>
+
+          {/* Past Settlements / Receipts Preview */}
+          {currentUserCommissionStats?.settlements && currentUserCommissionStats.settlements.length > 0 && (
+            <div className="space-y-2 pt-2 border-t border-slate-100">
+              <h4 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                <Receipt className="w-3.5 h-3.5 text-slate-500" />
+                <span>Recent Commission Payout Receipts</span>
+              </h4>
+              <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                {currentUserCommissionStats.settlements.map((cs) => (
+                  <div
+                    key={cs.id || cs._id}
+                    className="p-2.5 bg-slate-50 rounded-xl border border-slate-200/80 flex items-center justify-between text-xs"
+                  >
+                    <div>
+                      <div className="font-bold text-slate-800">
+                        {cs.createdAt ? new Date(cs.createdAt).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }) : 'Recently'}
+                        <span className="text-slate-400 font-normal ml-1.5 text-[11px]">
+                          via {cs.paymentMethod || 'Cash'} {cs.bankProvider ? `(${cs.bankProvider})` : ''}
+                        </span>
+                      </div>
+                      {cs.reference && (
+                        <span className="font-mono text-[10px] text-slate-500">Ref: {cs.reference}</span>
+                      )}
+                    </div>
+                    <span className="font-extrabold text-emerald-700">
+                      +{formatCurrency(cs.amount || 0)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Organization Scope Card */}
       <Card className="rounded-3xl border border-slate-200 shadow-xs">

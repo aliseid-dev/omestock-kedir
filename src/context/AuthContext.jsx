@@ -28,7 +28,7 @@ export function AuthProvider({ children }) {
   // Loading indicator: waiting for Clerk or Convex query to resolve
   const authLoading = !clerkLoaded || (isSignedIn && convexUser === undefined)
 
-  const isOwner = convexUser?.role === 'owner'
+  const isOwner = convexUser?.role === 'owner' || convexUser?.role === 'admin'
   const isSalesperson = convexUser?.role === 'salesperson'
   const isPending = isSalesperson && convexUser?.status === 'pending'
   const isApproved = convexUser?.status === 'approved' || isOwner
@@ -39,7 +39,13 @@ export function AuthProvider({ children }) {
         id: convexUser._id,
         name: convexUser.name,
         role: convexUser.role,
+        isOwner,
         email: convexUser.email,
+        storeId: convexUser.storeId,
+        storeName: convexUser.storeName,
+        allowCreditSales: convexUser.allowCreditSales,
+        canManageStock: isOwner || Boolean(convexUser.canManageStock),
+        canManageStaff: isOwner || Boolean(convexUser.canManageStaff),
         passcode: '1234', // default POS passcode for fast testing
       }
     : clerkUser
@@ -48,6 +54,7 @@ export function AuthProvider({ children }) {
         name: clerkUser.fullName || clerkUser.firstName || 'User',
         email: clerkUser.primaryEmailAddress?.emailAddress || '',
         role: 'salesperson',
+        isOwner: false,
       }
     : null
 
@@ -63,8 +70,9 @@ export function AuthProvider({ children }) {
 
   const permissions = {
     isOwner,
-    canManageStock: isOwner,
-    canManageStaff: isOwner,
+    isAdmin: convexUser?.role === 'admin',
+    canManageStock: isOwner || Boolean(convexUser?.canManageStock),
+    canManageStaff: isOwner || Boolean(convexUser?.canManageStaff),
     canProcessSale: true,
   }
 

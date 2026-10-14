@@ -22,7 +22,8 @@ import {
   Trash2,
   AlertTriangle,
   RotateCcw,
-  Bell
+  Bell,
+  History
 } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 import { useTenant } from '../../context/TenantContext'
@@ -202,6 +203,12 @@ export function MainLayout() {
       to: '/inventory',
       label: 'Stock',
       icon: Boxes,
+      ownerOnly: false,
+    },
+    {
+      to: '/history',
+      label: 'History',
+      icon: History,
       ownerOnly: false,
     },
     {
@@ -390,8 +397,8 @@ export function MainLayout() {
                 <span className="text-xs font-bold text-slate-900 truncate">
                   {currentUser?.name || 'User'}
                 </span>
-                <Badge variant={isOwner ? 'purple' : 'info'} className="text-[9px] px-1.5 py-0">
-                  {isOwner ? 'Owner' : 'Staff'}
+                <Badge variant={currentUser?.role === 'owner' ? 'purple' : currentUser?.role === 'admin' ? 'info' : 'default'} className="text-[9px] px-1.5 py-0 font-bold">
+                  {currentUser?.role === 'owner' ? 'Owner' : currentUser?.role === 'admin' ? 'Admin' : 'Staff'}
                 </Badge>
               </div>
               <p className="text-[10px] text-slate-400 truncate">
@@ -483,8 +490,8 @@ export function MainLayout() {
                         <div className="text-[11px] text-slate-500 truncate mb-1">
                           {currentUser?.email || clerkUser?.primaryEmailAddress?.emailAddress || ''}
                         </div>
-                        <Badge variant={isOwner ? 'purple' : 'info'} className="text-[10px] px-2 py-0.5 font-bold">
-                          {isOwner ? '👑 Organization Owner' : '👤 Salesperson'}
+                        <Badge variant={currentUser?.role === 'owner' ? 'purple' : currentUser?.role === 'admin' ? 'info' : 'default'} className="text-[10px] px-2 py-0.5 font-bold">
+                          {currentUser?.role === 'owner' ? '👑 Organization Owner' : currentUser?.role === 'admin' ? '⚡ Administrator' : '👤 Salesperson'}
                         </Badge>
                       </div>
                     </div>
@@ -597,8 +604,8 @@ export function MainLayout() {
                         <div className="text-[11px] text-slate-500 truncate mb-1">
                           {currentUser?.email || clerkUser?.primaryEmailAddress?.emailAddress || ''}
                         </div>
-                        <Badge variant={isOwner ? 'purple' : 'info'} className="text-[10px] px-2 py-0.5 font-bold">
-                          {isOwner ? '👑 Organization Owner' : '👤 Salesperson'}
+                        <Badge variant={currentUser?.role === 'owner' ? 'purple' : currentUser?.role === 'admin' ? 'info' : 'default'} className="text-[10px] px-2 py-0.5 font-bold">
+                          {currentUser?.role === 'owner' ? '👑 Organization Owner' : currentUser?.role === 'admin' ? '⚡ Administrator' : '👤 Salesperson'}
                         </Badge>
                       </div>
                     </div>
@@ -697,7 +704,20 @@ export function MainLayout() {
           <span>Stock</span>
         </NavLink>
 
-        {/* 3. Unpaid Sales */}
+        {/* 3. History */}
+        <NavLink
+          to="/history"
+          className={({ isActive }) =>
+            `flex flex-col items-center justify-center w-14 sm:w-16 py-1 rounded-xl text-[10px] font-bold transition-all touch-manipulation active:scale-95 ${
+              isActive ? 'text-emerald-700 bg-emerald-50' : 'text-slate-500 hover:text-slate-900'
+            }`
+          }
+        >
+          <History className="w-5 h-5 mb-0.5" />
+          <span>History</span>
+        </NavLink>
+
+        {/* 4. Unpaid Sales */}
         <NavLink
           to="/unpaid-sales"
           className={({ isActive }) =>
@@ -716,21 +736,6 @@ export function MainLayout() {
           </div>
           <span>Unpaid</span>
         </NavLink>
-
-        {/* 4. Staff Control */}
-        {isOwner && (
-          <NavLink
-            to="/staff"
-            className={({ isActive }) =>
-              `flex flex-col items-center justify-center w-14 sm:w-16 py-1 rounded-xl text-[10px] font-bold transition-all touch-manipulation active:scale-95 ${
-                isActive ? 'text-emerald-700 bg-emerald-50' : 'text-slate-500 hover:text-slate-900'
-              }`
-            }
-          >
-            <Users className="w-5 h-5 mb-0.5" />
-            <span>Staff</span>
-          </NavLink>
-        )}
 
         {/* 5. More Actions */}
         <button
@@ -815,6 +820,21 @@ export function MainLayout() {
                 <div className="flex-1">
                   <div>My Profile & Account</div>
                   <div className="text-[10px] text-slate-500 font-normal">Manage display name, password & PIN</div>
+                </div>
+              </Link>
+
+              {/* History Link in Mobile More */}
+              <Link
+                to="/history"
+                onClick={() => setShowMobileMoreSheet(false)}
+                className="flex items-center gap-3 p-3.5 rounded-xl bg-slate-50 hover:bg-slate-100 transition-colors touch-manipulation font-bold text-xs text-slate-800"
+              >
+                <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-800 flex items-center justify-center">
+                  <History className="w-4 h-4" />
+                </div>
+                <div className="flex-1">
+                  <div>Sales & Transaction History</div>
+                  <div className="text-[10px] text-slate-500 font-normal">Review past sales, receipts, daily & monthly reports</div>
                 </div>
               </Link>
 

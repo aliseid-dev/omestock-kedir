@@ -10,6 +10,7 @@
 
 import type * as approvals from "../approvals.js";
 import type * as audit from "../audit.js";
+import type * as commissions from "../commissions.js";
 import type * as http from "../http.js";
 import type * as inventory from "../inventory.js";
 import type * as sales from "../sales.js";
@@ -25,6 +26,7 @@ import type {
 declare const fullApi: ApiFromModules<{
   approvals: typeof approvals;
   audit: typeof audit;
+  commissions: typeof commissions;
   http: typeof http;
   inventory: typeof inventory;
   sales: typeof sales;

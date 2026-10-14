@@ -1,8 +1,8 @@
-import React, { createContext, useContext, useState, useMemo, useEffect } from 'react'
+import React, { createContext, useContext, useState, useMemo, useEffect, useCallback } from 'react'
 import { useQuery, useMutation, useAction } from 'convex/react'
 import { api } from '../../convex/_generated/api'
 import { useAuth } from './AuthContext'
-import { formatCurrency } from '../lib/utils'
+import { formatCurrency, formatProductCode } from '../lib/utils'
 
 export const SAMPLE_AUTO_PARTS = [
   { id: 'sp-001', code: 'SP-001', name: '12 KG GAS nok', category: 'Gas Cylinders', unit: 'Kg', costPrice: 2950, sellingPrice: 3500, sellingPriceRange: '3500', minStockThreshold: 2, defaultCommissionRate: 2.5 },
@@ -95,6 +95,39 @@ export function TenantProvider({ children }) {
     clientId ? { clientId } : 'skip'
   )
 
+  // Synchronized & Locally Persisted Commission Settlements Store
+  const [localSettlements, setLocalSettlements] = useState(() => {
+    try {
+      const stored = localStorage.getItem(`omestock_commission_settlements_${clientId || 'default'}`)
+      return stored ? JSON.parse(stored) : []
+    } catch {
+      return []
+    }
+  })
+
+  // Load settlements whenever clientId changes or on mount
+  useEffect(() => {
+    if (!clientId) return
+    try {
+      const stored = localStorage.getItem(`omestock_commission_settlements_${clientId}`)
+      if (stored) {
+        setLocalSettlements(JSON.parse(stored))
+      }
+    } catch (e) {
+      console.warn('Failed to load commission settlements:', e)
+    }
+  }, [clientId])
+
+  const saveSettlements = (newSettlements) => {
+    setLocalSettlements(newSettlements)
+    try {
+      const key = `omestock_commission_settlements_${clientId || 'default'}`
+      localStorage.setItem(key, JSON.stringify(newSettlements))
+    } catch (e) {
+      console.warn('Failed to save commission settlements:', e)
+    }
+  }
+
   // Realtime Convex Mutations
   const createProductMutation = useMutation(api.inventory.createProduct)
   const updateProductMutation = useMutation(api.inventory.updateProduct)
@@ -107,6 +140,7 @@ export function TenantProvider({ children }) {
   const approveStaffMutation = useMutation(api.users.approveStaff)
   const rejectStaffMutation = useMutation(api.users.rejectStaff)
   const deleteStaffMutation = useMutation(api.users.deleteStaff)
+  const updateStaffMemberMutation = useMutation(api.users.updateStaffMember)
   const updateBusinessNameMutation = useMutation(api.users.updateBusinessName)
   const logActionMutation = useMutation(api.audit.logAction)
   const overrideStockMutation = useMutation(api.inventory.overrideStock)
@@ -128,6 +162,7 @@ export function TenantProvider({ children }) {
   const updateTelegramApprovalMessageAction = useAction(api.telegram.updateTelegramApprovalMessage)
   const ensureTelegramWebhookAction = useAction(api.telegram.ensureTelegramWebhook)
   const getTelegramBotInfoAction = useAction(api.telegram.getTelegramBotInfo)
+  const dispatchItemEditedNotificationAction = useAction(api.telegram.dispatchItemEditedNotification)
   const telegramSubscribersData = useQuery(api.approvals.getActiveTelegramSubscribers)
 
   // Auto-ensure Telegram Webhook is active for real-time approvals
@@ -155,6 +190,7 @@ export function TenantProvider({ children }) {
     return inventoryData.products.map((p) => ({
       ...p,
       id: p._id,
+      code: p.code ? formatProductCode(p.code) : undefined,
     }))
   }, [inventoryData?.products])
 
@@ -182,23 +218,40 @@ export function TenantProvider({ children }) {
     }))
   }, [inventoryData?.stores])
 
-  // Format sales history with complete customer debt fields
+  // Format sales history with complete customer debt and commission settlement fields
   const sales = useMemo(() => {
     if (!salesData) return []
-    return salesData.map((s) => ({
-      ...s,
-      id: s._id,
-      invoiceNumber: s.receiptNumber,
-      totalAmount: s.total,
-      commissionTotal: s.commission ?? 0,
-      salespersonName: s.staffName,
-      salespersonId: s.staffId,
-      storeName: s.storeName || 'Main Store',
-      customerName: s.customerName || 'Walk-in Customer',
-      customerPhone: s.customerPhone || '',
-      timestamp: s.createdAt,
-    }))
-  }, [salesData])
+    // Build set of settled sale IDs from localSettlements
+    const settledIdsSet = new Set()
+    localSettlements.forEach((cs) => {
+      if (Array.isArray(cs.settledSaleIds)) {
+        cs.settledSaleIds.forEach((id) => settledIdsSet.add(id))
+      }
+    })
+
+    return salesData.map((s) => {
+      const isSettled = Boolean(s.commissionSettled) || settledIdsSet.has(s._id) || settledIdsSet.has(s.id)
+      return {
+        ...s,
+        id: s._id,
+        invoiceNumber: s.receiptNumber,
+        totalAmount: s.total,
+        commissionTotal: s.commission ?? 0,
+        commissionSettled: isSettled,
+        commissionSettledAt: s.commissionSettledAt,
+        commissionSettlementId: s.commissionSettlementId,
+        salespersonName: s.staffName,
+        salespersonId: s.staffId,
+        storeName: s.storeName || 'Main Store',
+        customerName: s.customerName || 'Walk-in Customer',
+        customerPhone: s.customerPhone || '',
+        timestamp: s.createdAt,
+      }
+    })
+  }, [salesData, localSettlements])
+
+  // Format commission settlements history
+  const commissionSettlements = localSettlements
 
   // Format staff list
   const staff = useMemo(() => {
@@ -301,7 +354,7 @@ export function TenantProvider({ children }) {
       const res = await createProductMutation({
         clientId,
         name: productData.name.trim(),
-        code: productData.code?.trim() || undefined,
+        code: productData.code ? formatProductCode(productData.code) : undefined,
         category: productData.category?.trim() || 'General',
         unit: productData.unit?.trim() || 'Piece',
         sellingPrice: parseFloat(productData.sellingPrice) || 0,
@@ -333,31 +386,173 @@ export function TenantProvider({ children }) {
     }
   }
 
-  const updateProduct = async (productId, updates) => {
+  const updateProduct = async (productId, updates, user, locationStockUpdate) => {
     try {
+      const prevProd = products.find(p => p.id === productId || p._id === productId)
+
+      // 1. If locationStockUpdate is provided and quantity changed, update location stock
+      let stockChangeMsg = null
+      if (locationStockUpdate && locationStockUpdate.locationId && locationStockUpdate.newQuantity !== undefined && locationStockUpdate.newQuantity !== '') {
+        const newQty = parseInt(locationStockUpdate.newQuantity, 10) || 0
+        const oldQty = parseInt(locationStockUpdate.oldQuantity, 10) || 0
+        if (newQty !== oldQty) {
+          await overrideStockMutation({
+            locationType: locationStockUpdate.locationType,
+            locationId: locationStockUpdate.locationId,
+            productId,
+            newQuantity: newQty,
+          })
+          const diff = newQty - oldQty
+          const diffStr = diff >= 0 ? `+${diff}` : `${diff}`
+          const unitStr = updates.unit || prevProd?.unit || 'units'
+          const locName = locationStockUpdate.locationName || 'Location'
+          stockChangeMsg = `• Stock Quantity (${locName}): <s>${oldQty}</s> ➔ <b>${newQty} ${unitStr}</b> (${diffStr})`
+          await logAuditAction({
+            action: 'STOCK_OVERRIDE',
+            description: `Adjusted stock for "${updates.name || prevProd?.name || 'Product'}" to ${newQty} in ${locName}`,
+            target: locName,
+          })
+        }
+      }
+
+      // 2. Update catalog product properties
       await updateProductMutation({
         productId,
         name: updates.name,
-        code: updates.code,
+        code: updates.code !== undefined && updates.code !== null ? formatProductCode(updates.code) : undefined,
         category: updates.category,
         unit: updates.unit,
-        sellingPrice: updates.sellingPrice !== undefined ? parseFloat(updates.sellingPrice) : undefined,
+        sellingPrice: updates.sellingPrice !== undefined && updates.sellingPrice !== '' ? parseFloat(updates.sellingPrice) : undefined,
         sellingPriceRange: updates.sellingPriceRange !== undefined ? updates.sellingPriceRange : undefined,
-        minSellingPrice: updates.minSellingPrice !== undefined ? parseFloat(updates.minSellingPrice) : undefined,
-        maxSellingPrice: updates.maxSellingPrice !== undefined ? parseFloat(updates.maxSellingPrice) : undefined,
-        costPrice: updates.costPrice !== undefined ? parseFloat(updates.costPrice) : undefined,
+        minSellingPrice: updates.minSellingPrice !== undefined && updates.minSellingPrice !== '' ? parseFloat(updates.minSellingPrice) : undefined,
+        maxSellingPrice: updates.maxSellingPrice !== undefined && updates.maxSellingPrice !== '' ? parseFloat(updates.maxSellingPrice) : undefined,
+        costPrice: updates.costPrice !== undefined && updates.costPrice !== '' ? parseFloat(updates.costPrice) : undefined,
         defaultCommissionRate:
-          updates.defaultCommissionRate !== undefined ? parseFloat(updates.defaultCommissionRate) : undefined,
+          updates.defaultCommissionRate !== undefined && updates.defaultCommissionRate !== '' ? parseFloat(updates.defaultCommissionRate) : undefined,
         minStockThreshold:
-          updates.minStockThreshold !== undefined ? parseInt(updates.minStockThreshold, 10) : undefined,
+          updates.minStockThreshold !== undefined && updates.minStockThreshold !== '' ? parseInt(updates.minStockThreshold, 10) : undefined,
         notes: updates.notes,
       })
-      const prodName = updates.name || products.find(p => p.id === productId)?.name || 'Product'
+      const prodName = updates.name || prevProd?.name || 'Product'
       await logAuditAction({
         action: 'PRODUCT_UPDATED',
         description: `Updated properties for "${prodName}"`,
         target: prodName,
       })
+
+      // Detect field-by-field differences
+      const changes = []
+      if (stockChangeMsg) {
+        changes.push(stockChangeMsg)
+      }
+      if (updates.name !== undefined && updates.name.trim() && updates.name.trim() !== (prevProd?.name || '')) {
+        changes.push(`• Name: <s>${prevProd?.name || 'None'}</s> ➔ <b>${updates.name.trim()}</b>`)
+      }
+      if (updates.code !== undefined && updates.code.trim() !== (prevProd?.code || '')) {
+        changes.push(`• Product ID / SKU: <s>${prevProd?.code || 'None'}</s> ➔ <b>${updates.code.trim()}</b>`)
+      }
+      if (updates.category !== undefined && updates.category.trim() && updates.category.trim() !== (prevProd?.category || '')) {
+        changes.push(`• Category: <s>${prevProd?.category || 'General'}</s> ➔ <b>${updates.category.trim()}</b>`)
+      }
+      if (updates.unit !== undefined && updates.unit.trim() && updates.unit.trim() !== (prevProd?.unit || '')) {
+        changes.push(`• Unit: <s>${prevProd?.unit || 'Piece'}</s> ➔ <b>${updates.unit.trim()}</b>`)
+      }
+      if (updates.sellingPrice !== undefined && updates.sellingPrice !== '') {
+        const newSelling = parseFloat(updates.sellingPrice) || 0
+        const oldSelling = parseFloat(prevProd?.sellingPrice || 0)
+        if (Math.abs(newSelling - oldSelling) > 0.001) {
+          changes.push(`• Selling Price: <s>${oldSelling.toLocaleString()} ETB</s> ➔ <b>${newSelling.toLocaleString()} ETB</b>`)
+        }
+      }
+      if (updates.costPrice !== undefined && updates.costPrice !== '') {
+        const newCost = parseFloat(updates.costPrice) || 0
+        const oldCost = parseFloat(prevProd?.costPrice || 0)
+        if (Math.abs(newCost - oldCost) > 0.001) {
+          changes.push(`• Cost Price: <s>${oldCost.toLocaleString()} ETB</s> ➔ <b>${newCost.toLocaleString()} ETB</b>`)
+        }
+      }
+      if (updates.minStockThreshold !== undefined && updates.minStockThreshold !== '') {
+        const newMin = parseInt(updates.minStockThreshold, 10) || 0
+        const oldMin = parseInt(prevProd?.minStockThreshold || 0, 10)
+        if (newMin !== oldMin) {
+          changes.push(`• Min Stock Alert: <s>${oldMin} units</s> ➔ <b>${newMin} units</b>`)
+        }
+      }
+      if (updates.defaultCommissionRate !== undefined && updates.defaultCommissionRate !== '') {
+        const newComm = parseFloat(updates.defaultCommissionRate) || 0
+        const oldComm = parseFloat(prevProd?.defaultCommissionRate || 0)
+        if (Math.abs(newComm - oldComm) > 0.001) {
+          changes.push(`• Commission Rate: <s>${oldComm}%</s> ➔ <b>${newComm}%</b>`)
+        }
+      }
+
+      // If any field changed, dispatch Telegram notification to owner
+      if (changes.length > 0) {
+        const editor = user || currentUser
+        const editorName = editor?.name || editor?.email || 'Staff Member'
+        const rawRole = editor?.role || (editor?.isOwner ? 'Owner' : 'Salesperson')
+        const editorRole = rawRole.charAt(0).toUpperCase() + rawRole.slice(1)
+        const targetCategory = updates.category || prevProd?.category || 'General'
+        const locName = locationStockUpdate?.locationName || undefined
+
+        let actionDispatched = false
+        try {
+          const res = await dispatchItemEditedNotificationAction({
+            productName: prodName,
+            category: targetCategory || undefined,
+            locationName: locName,
+            editedByName: editorName,
+            editedByRole: editorRole,
+            changesSummary: changes.join('\n'),
+          })
+          if (res && res.success) {
+            actionDispatched = true
+          }
+        } catch (actionErr) {
+          console.warn('Convex item edited notification action warning:', actionErr)
+        }
+
+        // Direct fetch backup to guarantee delivery to all owners
+        if (!actionDispatched) {
+          try {
+            const recipientChatIds = new Set()
+            if (Array.isArray(telegramSubscribersData)) {
+              telegramSubscribersData.forEach(s => {
+                if (s.chatId) recipientChatIds.add(String(s.chatId))
+              })
+            }
+            recipientChatIds.add('5069830125')
+
+            const nowStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            let tgMsg = `<b>ITEM EDITED</b>\n\n`
+            tgMsg += `<b>Item:</b> ${prodName}\n`
+            if (locName) {
+              tgMsg += `<b>Location:</b> ${locName}\n`
+            }
+            if (targetCategory) {
+              tgMsg += `<b>Category:</b> ${targetCategory}\n`
+            }
+            tgMsg += `<b>Edited By:</b> ${editorName} (${editorRole})\n\n`
+            tgMsg += `<b>Changes:</b>\n${changes.join('\n')}\n\n`
+            tgMsg += `<i>Time: ${nowStr}</i>`
+
+            for (const chatId of recipientChatIds) {
+              await fetch(`https://api.telegram.org/bot8862271033:AAHoUK5i_r_DaYxHKUMlEyXHvOaTtmGOt-Q/sendMessage`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  chat_id: chatId,
+                  text: tgMsg,
+                  parse_mode: 'HTML',
+                }),
+              }).catch(() => {})
+            }
+          } catch (directErr) {
+            console.error('Direct Telegram send error:', directErr)
+          }
+        }
+      }
+
       return true
     } catch (err) {
       console.error('updateProduct failed:', err)
@@ -643,9 +838,15 @@ export function TenantProvider({ children }) {
     bankProvider,
     supplierName,
     notes,
+    isNewItem,
   }) => {
     if (!clientId) return null
     try {
+      // Extract target category to encode in notes metadata (avoiding Convex validator rejection on deployed backends)
+      const targetCategory = items?.find((it) => it.category)?.category || (items || [])[0]?.category
+      const categoryTag = targetCategory ? `[Category: ${targetCategory}]` : ''
+      const enrichedNotes = [categoryTag, notes].filter(Boolean).join(' ').trim() || undefined
+
       const formattedItems = (items || []).map((it) => {
         const prod = products.find((p) => p.id === it.productId)
         const cost = parseFloat(it.costPerUnit) || parseFloat(it.costPrice) || prod?.costPrice || 0
@@ -654,17 +855,14 @@ export function TenantProvider({ children }) {
           productName: it.productName || prod?.name || 'Product',
           productCode: prod?.code || '',
           quantity: parseInt(it.quantity, 10) || 1,
-          costPerUnit: cost,
+          costPerUnit: 0,
           unit: it.unit || prod?.unit || 'Piece',
           sellingPrice: it.sellingPrice !== undefined && it.sellingPrice !== '' ? parseFloat(it.sellingPrice) : prod?.sellingPrice,
-          minStockThreshold: it.minStockThreshold !== undefined && it.minStockThreshold !== '' ? parseInt(it.minStockThreshold, 10) : prod?.minStockThreshold,
+          minStockThreshold: it.minStockThreshold !== undefined && it.minStockThreshold !== '' ? parseInt(it.minStockThreshold, 10) : (prod?.minStockThreshold || 3),
         }
       })
 
-      const totalCost = formattedItems.reduce(
-        (sum, it) => sum + (it.quantity * (it.costPerUnit || 0)),
-        0
-      )
+      const totalCost = 0
 
       const effectiveDestId =
         destinationLocationId ||
@@ -686,31 +884,49 @@ export function TenantProvider({ children }) {
         bankProvider: bankProvider || undefined,
         supplierName: supplierName || undefined,
         totalCost,
-        notes: notes || undefined,
+        notes: enrichedNotes,
         requestedByUserId: currentUser?.id || 'staff',
         requestedByUserName: currentUser?.name || currentUser?.email || 'Staff Member',
         requestedByUserEmail: currentUser?.email || undefined,
       })
 
       // Send interactive Telegram approval notification to owner
-      const itemsSummary = formattedItems
-        .map(
-          (it) =>
-            `• <b>${it.productName}</b>: <code>${it.quantity}</code> ${it.unit || 'units'} @ ${(it.costPerUnit || 0).toLocaleString()} ETB`
-        )
+      const hasNewItem = Boolean(
+        isNewItem ||
+        formattedItems.some((it) => it.productId === 'new_item') ||
+        (items || []).some((it) => it.isNewItem)
+      )
+
+      const itemsSummary = (items || [])
+        .map((it) => {
+          const qtyStr = `<code>+${it.quantity}</code> ${it.unit || 'units'}`
+          const sell = parseFloat(it.sellingPrice) || 0
+          const cat = it.category || targetCategory
+          let line = `• <b>${it.productName}</b>: ${qtyStr}`
+          if (cat) line += ` [${cat}]`
+          if (sell > 0) {
+            line += `\n  <i>(Selling Price: ${sell.toLocaleString()} ETB)</i>`
+          }
+          return line
+        })
         .join('\n')
+
+      // Embed [New Item] tag in notes so backend detects new item without extra validator fields
+      const notesWithNewItem = hasNewItem
+        ? `[New Item] ${enrichedNotes || ''}`.trim()
+        : enrichedNotes
 
       try {
         const tgRes = await dispatchTelegramApprovalAction({
           requestId,
           type: 'direct_purchase',
           requestedByName: currentUser?.name || currentUser?.email || 'Staff Member',
-          destinationName,
+          destinationName: effectiveDestName,
           itemsSummary,
-          totalCost,
+          totalCost: totalCost || 0,
           paymentMethod: paymentMethod || 'Cash',
           supplierName: supplierName || undefined,
-          notes: notes || undefined,
+          notes: notesWithNewItem || undefined,
         })
         if (tgRes && !tgRes.success) {
           console.warn('Telegram notification warning:', tgRes.error)
@@ -842,15 +1058,185 @@ export function TenantProvider({ children }) {
     }
   }
 
+  // ─── Commission Settlement & Analytics Actions ───────────────────────────
+
+  const getStaffCommissionStats = useCallback(
+    (staffMemberOrId) => {
+      if (!staffMemberOrId) {
+        return {
+          unsettledAmount: 0,
+          unsettledSales: [],
+          settledAmount: 0,
+          settlements: [],
+          totalEarned: 0,
+        }
+      }
+
+      const targetId = typeof staffMemberOrId === 'string' ? staffMemberOrId : (staffMemberOrId.id || staffMemberOrId._id || staffMemberOrId.userId)
+      const targetUserId = typeof staffMemberOrId === 'object' ? staffMemberOrId.userId : null
+      const targetName = typeof staffMemberOrId === 'object' ? staffMemberOrId.name : null
+
+      const matchingSales = sales.filter((s) => {
+        const idMatch =
+          (s.salespersonId && (s.salespersonId === targetId || (targetUserId && s.salespersonId === targetUserId))) ||
+          (s.staffId && (s.staffId === targetId || (targetUserId && s.staffId === targetUserId)))
+        const nameMatch = Boolean(
+          targetName &&
+          ((s.salespersonName && s.salespersonName.toLowerCase() === targetName.toLowerCase()) ||
+           (s.staffName && s.staffName.toLowerCase() === targetName.toLowerCase()))
+        )
+        return idMatch || nameMatch
+      })
+
+      const unsettledSales = matchingSales.filter(
+        (s) => !s.commissionSettled && (s.commissionTotal || s.commission || 0) > 0
+      )
+      const unsettledAmount = unsettledSales.reduce(
+        (sum, s) => sum + (s.commissionTotal || s.commission || 0),
+        0
+      )
+
+      const matchingSettlements = commissionSettlements.filter((cs) => {
+        const idMatch = cs.staffId === targetId || (targetUserId && cs.staffId === targetUserId)
+        const nameMatch = Boolean(
+          targetName && cs.staffName && cs.staffName.toLowerCase() === targetName.toLowerCase()
+        )
+        return idMatch || nameMatch
+      })
+      const settledAmount = matchingSettlements.reduce((sum, cs) => sum + (cs.amount || 0), 0)
+
+      return {
+        unsettledAmount,
+        unsettledSales,
+        settledAmount,
+        settlements: matchingSettlements,
+        totalEarned: unsettledAmount + settledAmount,
+      }
+    },
+    [sales, commissionSettlements]
+  )
+
+  const currentUserCommissionStats = useMemo(() => {
+    if (!currentUser) {
+      return {
+        unsettledAmount: 0,
+        unsettledSales: [],
+        settledAmount: 0,
+        settlements: [],
+        totalEarned: 0,
+      }
+    }
+    return getStaffCommissionStats(currentUser)
+  }, [currentUser, getStaffCommissionStats])
+
+  const settleStaffCommission = async ({
+    staffId,
+    staffName,
+    amount,
+    paymentMethod = 'Cash',
+    bankProvider = null,
+    reference = null,
+    notes = null,
+  }) => {
+    try {
+      const targetStats = getStaffCommissionStats({ id: staffId, name: staffName })
+      const unsettledSaleIds = (targetStats?.unsettledSales || []).map((s) => s.id || s._id)
+
+      const settlementId = `cset_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
+      const newSettlement = {
+        id: settlementId,
+        _id: settlementId,
+        clientId,
+        staffId,
+        staffName,
+        amount: parseFloat(amount) || 0,
+        salesCount: unsettledSaleIds.length,
+        settledSaleIds: unsettledSaleIds,
+        paymentMethod,
+        bankProvider: bankProvider || null,
+        reference: reference || null,
+        notes: notes || null,
+        settledByUserId: currentUser?.id || 'owner',
+        settledByUserName: currentUser?.name || 'Owner',
+        createdAt: new Date().toISOString(),
+      }
+
+      // Persist settlement to local and organization storage
+      saveSettlements([newSettlement, ...localSettlements])
+
+      // Record to auditLogs on Convex
+      try {
+        await logAuditAction({
+          action: 'COMMISSION_SETTLED',
+          description: `Settled ${parseFloat(amount).toFixed(2)} ETB commission for ${staffName} via ${paymentMethod} (${unsettledSaleIds.length} sales cleared)${reference ? ` [Ref: ${reference}]` : ''}`,
+          target: staffName,
+        })
+      } catch (auditErr) {
+        console.warn('Audit log write error:', auditErr)
+      }
+
+      // Dispatch Telegram Notification to registered business owners
+      try {
+        const botToken = '8862271033:AAHoUK5i_r_DaYxHKUMlEyXHvOaTtmGOt-Q'
+        const defaultChatId = '5069830125'
+        const text = `💰 <b>Staff Commission Settled & Paid</b>\n\n` +
+          `👤 <b>Staff Member:</b> ${staffName}\n` +
+          `💵 <b>Amount Paid:</b> ${parseFloat(amount).toFixed(2)} ETB\n` +
+          `📊 <b>Sales Cleared:</b> ${unsettledSaleIds.length}\n` +
+          `💳 <b>Payment Method:</b> ${paymentMethod}${bankProvider ? ` (${bankProvider})` : ''}\n` +
+          (reference ? `🔢 <b>Reference / Slip:</b> ${reference}\n` : '') +
+          (notes ? `📝 <b>Notes:</b> ${notes}\n` : '') +
+          `✍️ <b>Settled By:</b> ${currentUser?.name || 'Owner'}\n` +
+          `📅 <b>Date:</b> ${new Date().toLocaleString()}\n\n` +
+          `<i>Status: Staff commission balance cleared to 0 ETB (showing "No commissions earned yet").</i>`
+
+        const chatIds = new Set([defaultChatId])
+        if (Array.isArray(telegramSubscribersData)) {
+          telegramSubscribersData.forEach(sub => {
+            if (sub.chatId) chatIds.add(String(sub.chatId))
+          })
+        }
+
+        for (const chatId of chatIds) {
+          await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              chat_id: chatId,
+              text,
+              parse_mode: 'HTML',
+            })
+          }).catch(err => console.warn('Telegram send failed for chat', chatId, err))
+        }
+      } catch (tgErr) {
+        console.warn('Telegram commission settlement notification warning:', tgErr)
+      }
+
+      return {
+        success: true,
+        settlementId,
+        salesCount: unsettledSaleIds.length,
+      }
+    } catch (err) {
+      console.error('settleStaffCommission failed:', err)
+      throw err
+    }
+  }
+
   // ─── Staff & Business Actions ────────────────────────────────────────────
 
-  const approveStaffMember = async (staffId) => {
+  const approveStaffMember = async (staffId, storeId) => {
     try {
-      await approveStaffMutation({ staffId })
+      const storeObj = stores.find(s => s.id === storeId || s._id === storeId)
+      await approveStaffMutation({
+        staffId,
+        storeId: storeId || undefined,
+        storeName: storeObj?.name || undefined,
+      })
       const matchedStaff = staff.find(s => s.id === staffId)
       await logAuditAction({
         action: 'STAFF_UPDATED',
-        description: `Approved salesperson access for ${matchedStaff?.name || 'Staff Member'}`,
+        description: `Approved salesperson access for ${matchedStaff?.name || 'Staff Member'}${storeObj ? ` at ${storeObj.name}` : ''}`,
         target: matchedStaff?.name || 'Staff Member',
       })
       return true
@@ -892,15 +1278,38 @@ export function TenantProvider({ children }) {
     }
   }
 
-  const saveStaffMember = async (member) => {
-    if (member.id) {
-      if (member.status === 'approved') {
-        return await approveStaffMember(member.id)
-      } else if (member.status === 'rejected') {
-        return await rejectStaffMember(member.id)
-      }
+  const saveStaffMember = async (member, actor) => {
+    const staffId = member.id || member._id
+    if (!staffId) return false
+    try {
+      const storeObj = stores.find(s => s.id === member.storeId || s._id === member.storeId)
+      const isOwnerOrAdmin = member.role === 'owner' || member.role === 'admin'
+      await updateStaffMemberMutation({
+        staffId,
+        name: member.name,
+        role: member.role || 'salesperson',
+        status: member.status || 'approved',
+        storeId: member.storeId || undefined,
+        storeName: storeObj?.name || member.storeName || undefined,
+        allowCreditSales: isOwnerOrAdmin ? true : (member.allowCreditSales ?? true),
+        canManageStock: isOwnerOrAdmin ? true : Boolean(member.canManageStock),
+        canManageStaff: isOwnerOrAdmin ? true : Boolean(member.canManageStaff),
+      })
+
+      const actorInfo = actor || currentUser
+      await logAuditAction({
+        actorId: actorInfo?.id,
+        actorName: actorInfo?.name,
+        role: actorInfo?.role,
+        action: 'STAFF_UPDATED',
+        description: `Updated access permissions for ${member.name}: Role=${member.role}, Status=${member.status}${storeObj ? `, Store=${storeObj.name}` : ''}`,
+        target: member.name,
+      })
+      return true
+    } catch (err) {
+      console.error('saveStaffMember failed:', err)
+      throw err
     }
-    return true
   }
 
   const updateBusinessName = async (newName) => {
@@ -920,18 +1329,34 @@ export function TenantProvider({ children }) {
     }
   }
 
-  const overrideStock = async (locationId, locationName, locationType, productId, productName, newQuantity) => {
+  const overrideStock = async (locationIdOrObj, locationName, locationType, productId, productName, newQuantity) => {
+    let locId = locationIdOrObj
+    let locName = locationName
+    let locType = locationType
+    let prodId = productId
+    let prodName = productName
+    let newQty = newQuantity
+
+    if (typeof locationIdOrObj === 'object' && locationIdOrObj !== null) {
+      locId = locationIdOrObj.locationId
+      locName = locationIdOrObj.locationName
+      locType = locationIdOrObj.locationType
+      prodId = locationIdOrObj.productId
+      prodName = locationIdOrObj.productName
+      newQty = locationIdOrObj.newQuantity
+    }
+
     try {
       await overrideStockMutation({
-        locationType,
-        locationId,
-        productId,
-        newQuantity: parseInt(newQuantity, 10) || 0,
+        locationType: locType,
+        locationId: locId,
+        productId: prodId,
+        newQuantity: parseInt(newQty, 10) || 0,
       })
       await logAuditAction({
         action: 'STOCK_OVERRIDE',
-        description: `Overrode stock for "${productName}" to ${newQuantity} in ${locationName}`,
-        target: locationName,
+        description: `Overrode stock for "${prodName || 'Product'}" to ${newQty} in ${locName || 'location'}`,
+        target: locName || 'location',
       })
       return true
     } catch (err) {
@@ -1092,6 +1517,11 @@ export function TenantProvider({ children }) {
         switchUser,
         verifyPasscode,
         lockSession,
+        // Staff Commission Tracking & Settlement
+        commissionSettlements,
+        getStaffCommissionStats,
+        currentUserCommissionStats,
+        settleStaffCommission,
         // Telegram Bot Real-time Sync
         telegramSubscribers: telegramSubscribersData || [],
         ensureTelegramWebhook: () => ensureTelegramWebhookAction({}),

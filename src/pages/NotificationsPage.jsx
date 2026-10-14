@@ -25,7 +25,8 @@ import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card'
 
 export function NotificationsPage() {
   const navigate = useNavigate()
-  const { isOwner } = useAuth()
+  const { isOwner, currentUser } = useAuth()
+  const isOwnerUser = Boolean(currentUser?.role === 'owner' || (isOwner && currentUser?.role !== 'salesperson'))
   const { toast } = useToast()
   const {
     pendingApprovals,
@@ -45,9 +46,9 @@ export function NotificationsPage() {
   const [botUsername, setBotUsername] = useState('')
   const [copiedLink, setCopiedLink] = useState(false)
 
-  // Fetch Bot Username for easy 1-click sharing
+  // Fetch Bot Username for easy 1-click sharing (Owners only)
   useEffect(() => {
-    if (getTelegramBotInfo) {
+    if (getTelegramBotInfo && isOwnerUser) {
       getTelegramBotInfo()
         .then((data) => {
           if (data?.ok && data.result?.username) {
@@ -56,7 +57,7 @@ export function NotificationsPage() {
         })
         .catch(() => {})
     }
-  }, [getTelegramBotInfo])
+  }, [getTelegramBotInfo, isOwnerUser])
 
   const pendingCount = pendingApprovals?.length || 0
   const historyList = approvalHistory || []
@@ -170,41 +171,42 @@ export function NotificationsPage() {
         </div>
       </div>
 
-      {/* Telegram 1-Tap Connect Card */}
-      <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-blue-950 rounded-2xl p-3.5 sm:p-5 text-white shadow-xs border border-indigo-900/40 space-y-3 sm:space-y-0 sm:flex sm:items-center sm:justify-between gap-4">
-        <div className="space-y-1">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="flex h-2 w-2 relative">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400"></span>
-            </span>
-            <span className="font-black text-xs sm:text-sm uppercase tracking-wide text-blue-200">
-              Telegram Approvals
-            </span>
-            <span className="bg-blue-800/80 text-blue-100 text-[10px] font-bold px-2 py-0.5 rounded-full border border-blue-600/50">
-              {telegramSubscribers.length} Connected Approver{telegramSubscribers.length === 1 ? '' : 's'}
-            </span>
+      {/* Telegram 1-Tap Connect Card (Visible ONLY to Owner) */}
+      {isOwnerUser && (
+        <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-blue-950 rounded-2xl p-3.5 sm:p-5 text-white shadow-xs border border-indigo-900/40 space-y-3 sm:space-y-0 sm:flex sm:items-center sm:justify-between gap-4">
+          <div className="space-y-1">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="flex h-2 w-2 relative">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400"></span>
+              </span>
+              <span className="font-black text-xs sm:text-sm uppercase tracking-wide text-blue-200">
+                Telegram Approvals
+              </span>
+              <span className="bg-blue-800/80 text-blue-100 text-[10px] font-bold px-2 py-0.5 rounded-full border border-blue-600/50">
+                {telegramSubscribers.length} Connected Approver{telegramSubscribers.length === 1 ? '' : 's'}
+              </span>
+            </div>
+            <p className="text-[11px] sm:text-xs text-blue-100/90 leading-relaxed max-w-xl">
+              Accept and reject stock transfers and direct purchases with 1 tap from your phone.
+            </p>
           </div>
-          <p className="text-[11px] sm:text-xs text-blue-100/90 leading-relaxed max-w-xl">
-            Accept and reject stock transfers and direct purchases with 1 tap from your phone.
-          </p>
-        </div>
 
-        <div className="flex items-center gap-2 shrink-0 pt-1 sm:pt-0">
-          {botUsername && (
-            <a
-              href={`https://t.me/${botUsername}`}
-              target="_blank"
-              rel="noreferrer"
-              className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-white text-blue-900 font-bold text-xs hover:bg-blue-50 transition-colors shadow-2xs cursor-pointer min-h-[38px]"
-            >
-              <Send className="w-3.5 h-3.5 text-blue-600" />
-              <span>Open @{botUsername}</span>
-            </a>
-          )}
-          
+          <div className="flex items-center gap-2 shrink-0 pt-1 sm:pt-0">
+            {botUsername && (
+              <a
+                href={`https://t.me/${botUsername}`}
+                target="_blank"
+                rel="noreferrer"
+                className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-white text-blue-900 font-bold text-xs hover:bg-blue-50 transition-colors shadow-2xs cursor-pointer min-h-[38px]"
+              >
+                <Send className="w-3.5 h-3.5 text-blue-600" />
+                <span>Open @{botUsername}</span>
+              </a>
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Tabs Switcher: Pending vs History */}
       <div className="flex items-center gap-1.5 p-1 bg-slate-100/90 rounded-2xl border border-slate-200">
@@ -531,7 +533,7 @@ export function NotificationsPage() {
                     )
                   ) : (
                     <div className="text-right text-[11px] font-bold text-amber-600 italic">
-                      Awaiting review by Business Owner (via Web or Telegram).
+                      Awaiting review by Business Owner.
                     </div>
                   )}
                 </div>

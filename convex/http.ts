@@ -94,12 +94,16 @@ http.route({
                 reason: "Rejected via Telegram",
               });
 
+              try {
+                await ctx.runMutation(api.approvals.clearTelegramSession, { chatId });
+              } catch (_) {}
+
               await fetch(`https://api.telegram.org/bot${token}/answerCallbackQuery`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                   callback_query_id: callbackId,
-                  text: "❌ Request rejected. No stock changes applied.",
+                  text: "Request rejected. No stock changes applied.",
                   show_alert: false,
                 }),
               });
@@ -108,7 +112,7 @@ http.route({
               const currentText = message.text || "";
               const updatedText =
                 currentText.replace(/👉 Please review and choose an action below:/g, "") +
-                `\n\n━━━━━━━━━━━━━━━━━━━━\n❌ REJECTED by ${reviewerName} at ${nowTime}\nNo stock changes were applied.`;
+                `\n\n━━━━━━━━━━━━━━━━━━━━\nREJECTED by ${reviewerName} at ${nowTime}\nNo stock changes were applied.`;
 
               await fetch(`https://api.telegram.org/bot${token}/editMessageText`, {
                 method: "POST",
@@ -120,85 +124,49 @@ http.route({
                   reply_markup: { inline_keyboard: [] },
                 }),
               });
-            } else if (actionType === "approve") {
-              if (req.type === "transfer") {
-                // Stock transfers are approved immediately with 1 tap (no retail selling price configuration needed)
-                await ctx.runMutation(api.approvals.approveRequest, {
-                  requestId: requestId as any,
-                  reviewerUserId: reviewerId,
-                  reviewerUserName: reviewerName,
-                });
+            } else if (actionType === "approve" || actionType === "keep_price" || actionType === "setup_pricing") {
+              // Direct 1-tap approval for transfers and restocks using submitted prices & default min alert
+              await ctx.runMutation(api.approvals.approveRequest, {
+                requestId: requestId as any,
+                reviewerUserId: reviewerId,
+                reviewerUserName: reviewerName,
+              });
 
-                await fetch(`https://api.telegram.org/bot${token}/answerCallbackQuery`, {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    callback_query_id: callbackId,
-                    text: "✅ Transfer approved! Stock updated in OMESTOCK.",
-                    show_alert: false,
-                  }),
-                });
+              try {
+                await ctx.runMutation(api.approvals.clearTelegramSession, { chatId });
+              } catch (_) {}
 
-                const nowTime = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-                const currentText = message.text || "";
-                const updatedText =
-                  currentText.replace(/👉 Please review and choose an action below:/g, "") +
-                  `\n\n━━━━━━━━━━━━━━━━━━━━\n✅ APPROVED by ${reviewerName} at ${nowTime}\nStock has been transferred automatically.`;
+              const isTransfer = req.type === "transfer";
+              const actionLabel = isTransfer ? "Transfer" : "Restock";
 
-                await fetch(`https://api.telegram.org/bot${token}/editMessageText`, {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    chat_id: chatId,
-                    message_id: messageId,
-                    text: updatedText,
-                    reply_markup: { inline_keyboard: [] },
-                  }),
-                });
-              } else {
-                // Direct purchase: initiate 2-step setup (Step 1: Min Stock Alert -> Step 2: Selling Price)
-                await ctx.runMutation(api.approvals.setTelegramSession, {
-                  chatId,
-                  requestId: requestId as any,
-                  step: "awaiting_min_alert",
-                  originalMessageId: messageId,
-                });
+              await fetch(`https://api.telegram.org/bot${token}/answerCallbackQuery`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  callback_query_id: callbackId,
+                  text: `${actionLabel} approved. Stock updated.`,
+                  show_alert: false,
+                }),
+              });
 
-                await fetch(`https://api.telegram.org/bot${token}/answerCallbackQuery`, {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    callback_query_id: callbackId,
-                    text: "Step 1 of 2: Set Minimum Stock Alert",
-                    show_alert: false,
-                  }),
-                });
+              const nowTime = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+              const currentText = message.text || "";
+              const updatedText =
+                currentText.replace(/👉 Please review and choose an action below:/g, "")
+                           .replace(/👉 (Keep current prices or edit pricing\?|Please review.*)/g, "") +
+                `\n\n━━━━━━━━━━━━━━━━━━━━\nAPPROVED by ${reviewerName} at ${nowTime}\nStock and pricing updated in OMESTOCK.`;
 
-                const itemNames = (req.items || [])
-                  .map((it: any) => `${it.productName} (${it.quantity} ${it.unit || "units"})`)
-                  .join(", ");
-                const defaultMinAlert = req.items?.[0]?.minStockThreshold || 5;
-
-                const step1Text =
-                  `Please set the <b>Minimum Stock Alert</b> threshold (in units)?\n` +
-                  `<i>(When stock drops to or below this level, you will receive a low-stock alert)</i>\n\n` +
-                  `👉 <b>Reply with a number</b> (e.g. <code>${defaultMinAlert}</code> or <code>10</code>), or send <code>/skip</code> for default (${defaultMinAlert} units).\n` +
-                  `<i>(Send /cancel to abort approval)</i>`;
-
-                await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    chat_id: chatId,
-                    text: step1Text,
-                    parse_mode: "HTML",
-                    reply_markup: {
-                      force_reply: true,
-                      input_field_placeholder: `e.g. ${defaultMinAlert}`,
-                    },
-                  }),
-                });
-              }
+              await fetch(`https://api.telegram.org/bot${token}/editMessageText`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  chat_id: chatId,
+                  message_id: messageId,
+                  text: updatedText,
+                  parse_mode: "HTML",
+                  reply_markup: { inline_keyboard: [] },
+                }),
+              });
             }
           } catch (actionErr: any) {
             console.error("Error processing approval callback:", actionErr);
@@ -283,11 +251,132 @@ http.route({
           }
 
           // ---------------------------------------------------------------------
-          // Step 1: User replied with Minimum Stock Alert
+          // Step 1: User replied with Purchase / Cost Price
           // ---------------------------------------------------------------------
-          if (session.step === "awaiting_min_alert") {
-            let minAlert = 5;
-            const defaultMin = req.items?.[0]?.minStockThreshold || 5;
+          if (session.step === "awaiting_purchase_price") {
+            const firstItem = req.items?.[0];
+            const defaultCost = firstItem?.costPerUnit || 20;
+            let costPrice = defaultCost;
+
+            if (text.toLowerCase() === "/skip") {
+              costPrice = defaultCost;
+            } else {
+              const cleaned = text.replace(/,/g, "").replace(/[^0-9.]/g, "");
+              const parsed = parseFloat(cleaned);
+              if (isNaN(parsed) || parsed < 0) {
+                await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    chat_id: chatId,
+                    text: `⚠️ <b>Invalid purchase price.</b>\n\nPlease reply with a valid <b>Purchase Price</b> in ETB (e.g. <code>${defaultCost}</code>), or send <code>/skip</code>:`,
+                    parse_mode: "HTML",
+                    reply_markup: { force_reply: true, input_field_placeholder: `e.g. ${defaultCost}` },
+                  }),
+                });
+                return new Response(JSON.stringify({ ok: true }), { status: 200 });
+              }
+              costPrice = parsed;
+            }
+
+            // Advance session to Step 2: Selling Price
+            await ctx.runMutation(api.approvals.setTelegramSession, {
+              chatId,
+              requestId: session.requestId,
+              step: "awaiting_selling_price",
+              costPrice: costPrice,
+              originalMessageId: session.originalMessageId,
+            });
+
+            const suggestedSelling = firstItem?.sellingPrice || (costPrice > 0 ? Math.round(costPrice * 1.25) : 30);
+            const step2Text =
+              `✅ <b>Purchase Price Set:</b> <b>${costPrice.toLocaleString()} ETB</b>\n\n` +
+              `<b>Step 2 of 3: Retail Selling Price</b> 🏷️\n\n` +
+              `Please reply with the <b>Selling Price</b> in ETB:\n` +
+              `<i>(e.g. <code>${suggestedSelling}</code> or send <code>/skip</code> for ${suggestedSelling} ETB)</i>\n\n` +
+              `<i>(Send /cancel to abort approval)</i>`;
+
+            await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                chat_id: chatId,
+                text: step2Text,
+                parse_mode: "HTML",
+                reply_markup: { force_reply: true, input_field_placeholder: `e.g. ${suggestedSelling}` },
+              }),
+            });
+            return new Response(JSON.stringify({ ok: true }), { status: 200 });
+          }
+
+          // ---------------------------------------------------------------------
+          // Step 2: User replied with Retail Selling Price
+          // ---------------------------------------------------------------------
+          else if (session.step === "awaiting_selling_price") {
+            const firstItem = req.items?.[0];
+            const currentCost = session.costPrice !== undefined ? session.costPrice : (firstItem?.costPerUnit || 20);
+            const suggestedSelling = firstItem?.sellingPrice || (currentCost > 0 ? Math.round(currentCost * 1.25) : 30);
+
+            let sellingPrice = suggestedSelling;
+            if (text.toLowerCase() === "/skip") {
+              sellingPrice = suggestedSelling;
+            } else {
+              const cleaned = text.replace(/,/g, "").replace(/[^0-9.]/g, "");
+              const parsed = parseFloat(cleaned);
+              if (isNaN(parsed) || parsed <= 0) {
+                await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    chat_id: chatId,
+                    text: `⚠️ <b>Invalid selling price.</b>\n\nPlease reply with a valid <b>Retail Selling Price</b> in ETB (e.g. <code>${suggestedSelling}</code>), or send <code>/skip</code>:`,
+                    parse_mode: "HTML",
+                    reply_markup: { force_reply: true, input_field_placeholder: `e.g. ${suggestedSelling}` },
+                  }),
+                });
+                return new Response(JSON.stringify({ ok: true }), { status: 200 });
+              }
+              sellingPrice = parsed;
+            }
+
+            // Advance session to Step 3: Minimum Stock Alert
+            await ctx.runMutation(api.approvals.setTelegramSession, {
+              chatId,
+              requestId: session.requestId,
+              step: "awaiting_min_alert",
+              costPrice: session.costPrice,
+              sellingPrice: sellingPrice,
+              originalMessageId: session.originalMessageId,
+            });
+
+            const defaultMinAlert = firstItem?.minStockThreshold || 5;
+            const step3Text =
+              `✅ <b>Selling Price Set:</b> <b>${sellingPrice.toLocaleString()} ETB</b>\n\n` +
+              `<b>Step 3 of 3: Minimum Stock Alert</b> 🔔\n\n` +
+              `Please reply with the <b>Minimum Stock Alert</b> threshold in units:\n` +
+              `<i>(e.g. <code>${defaultMinAlert}</code> or send <code>/skip</code> for default: ${defaultMinAlert} units)</i>\n\n` +
+              `<i>(Send /cancel to abort approval)</i>`;
+
+            await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                chat_id: chatId,
+                text: step3Text,
+                parse_mode: "HTML",
+                reply_markup: { force_reply: true, input_field_placeholder: `e.g. ${defaultMinAlert}` },
+              }),
+            });
+            return new Response(JSON.stringify({ ok: true }), { status: 200 });
+          }
+
+          // ---------------------------------------------------------------------
+          // Step 3: User replied with Minimum Stock Alert -> Finalize Approval!
+          // ---------------------------------------------------------------------
+          else if (session.step === "awaiting_min_alert") {
+            const firstItem = req.items?.[0];
+            const defaultMin = firstItem?.minStockThreshold || 5;
+            let minAlert = defaultMin;
 
             if (text.toLowerCase() === "/skip") {
               minAlert = defaultMin;
@@ -302,10 +391,7 @@ http.route({
                     chat_id: chatId,
                     text: `⚠️ <b>Invalid number.</b>\n\nPlease reply with a valid number for the <b>Minimum Stock Alert</b> (e.g. <code>${defaultMin}</code> or <code>10</code>), or send <code>/skip</code>:`,
                     parse_mode: "HTML",
-                    reply_markup: {
-                      force_reply: true,
-                      input_field_placeholder: `e.g. ${defaultMin}`,
-                    },
+                    reply_markup: { force_reply: true, input_field_placeholder: `e.g. ${defaultMin}` },
                   }),
                 });
                 return new Response(JSON.stringify({ ok: true }), { status: 200 });
@@ -313,95 +399,15 @@ http.route({
               minAlert = parsed;
             }
 
-            // Advance session to Step 2
-            await ctx.runMutation(api.approvals.setTelegramSession, {
-              chatId,
-              requestId: session.requestId,
-              step: "awaiting_selling_price",
-              minStockThreshold: minAlert,
-              originalMessageId: session.originalMessageId,
-            });
-
-            // Calculate suggested/default selling price
-            const firstItem = req.items?.[0];
-            const itemCost =
-              firstItem?.costPerUnit ||
-              (req.totalCost && firstItem?.quantity ? Math.round(req.totalCost / firstItem.quantity) : 0);
-            const suggestedPrice =
-              firstItem?.sellingPrice || (itemCost > 0 ? Math.round(itemCost * 1.25) : 100);
-
-            const itemNames = (req.items || [])
-              .map((it: any) => `${it.productName} (${it.quantity} ${it.unit || "units"})`)
-              .join(", ");
-
-            const step2Text =
-              `🔔 <b>Min Stock Alert Set:</b> <b>${minAlert} units</b> ✅\n\n` +
-              `Now set <b>Retail Selling Price</b> (in ETB):\n` +
-              `<i>(This is the price customers will pay in the store)</i>\n\n` +
-              `👉 <b>Reply with the price</b> \n` +
-              `<i>(Send /cancel to abort approval)</i>`;
-
-            await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                chat_id: chatId,
-                text: step2Text,
-                parse_mode: "HTML",
-                reply_markup: {
-                  force_reply: true,
-                  input_field_placeholder: `e.g. ${suggestedPrice}`,
-                },
-              }),
-            });
-
-            return new Response(JSON.stringify({ ok: true }), { status: 200 });
-          }
-
-          // ---------------------------------------------------------------------
-          // Step 2: User replied with Retail Selling Price
-          // ---------------------------------------------------------------------
-          else if (session.step === "awaiting_selling_price") {
-            const firstItem = req.items?.[0];
-            const itemCost =
-              firstItem?.costPerUnit ||
-              (req.totalCost && firstItem?.quantity ? Math.round(req.totalCost / firstItem.quantity) : 0);
-            const suggestedPrice =
-              firstItem?.sellingPrice || (itemCost > 0 ? Math.round(itemCost * 1.25) : 100);
-
-            let sellingPrice = suggestedPrice;
-            if (text.toLowerCase() === "/skip") {
-              sellingPrice = suggestedPrice;
-            } else {
-              const cleaned = text.replace(/,/g, "").replace(/[^0-9.]/g, "");
-              const parsed = parseFloat(cleaned);
-              if (isNaN(parsed) || parsed <= 0) {
-                await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    chat_id: chatId,
-                    text: `⚠️ <b>Invalid price.</b>\n\nPlease reply with a valid <b>Retail Selling Price</b> in ETB (e.g. <code>${suggestedPrice}</code>), or send <code>/skip</code>:`,
-                    parse_mode: "HTML",
-                    reply_markup: {
-                      force_reply: true,
-                      input_field_placeholder: `e.g. ${suggestedPrice}`,
-                    },
-                  }),
-                });
-                return new Response(JSON.stringify({ ok: true }), { status: 200 });
-              }
-              sellingPrice = parsed;
-            }
-
-            const minStockThreshold = session.minStockThreshold || 5;
+            const finalCostPrice = session.costPrice !== undefined ? session.costPrice : (firstItem?.costPerUnit || 20);
+            const finalSellingPrice = session.sellingPrice !== undefined ? session.sellingPrice : (firstItem?.sellingPrice || Math.round(finalCostPrice * 1.25));
 
             // Build product configs for all items
             const productConfigs = (req.items || []).map((it: any) => ({
               productId: it.productId,
-              sellingPrice: sellingPrice,
-              minStockThreshold: minStockThreshold,
-              costPrice: it.costPerUnit || (itemCost > 0 ? itemCost : undefined),
+              sellingPrice: finalSellingPrice,
+              minStockThreshold: minAlert,
+              costPrice: finalCostPrice,
               unit: it.unit || "Piece",
             }));
 
@@ -428,16 +434,16 @@ http.route({
                     chat_id: chatId,
                     message_id: session.originalMessageId,
                     text:
-                      `🛒 <b>DIRECT PURCHASE REQUEST — APPROVED ✅</b>\n\n` +
+                      `🛒 <b>STOCK INTAKE — APPROVED ✅</b>\n\n` +
                       `👤 <b>Requested By:</b> ${req.requestedByUserName}\n` +
                       `📥 <b>Destination:</b> ${req.destinationLocationName || "Store"}\n` +
-                      (req.supplierName ? `🏢 <b>Supplier:</b> ${req.supplierName}\n` : "") +
+                      (req.supplierName ? `🏢 <b>Ref:</b> ${req.supplierName}\n` : "") +
                       `📦 <b>Product:</b> ${itemNames}\n` +
-                      `🏷 <b>Selling Price:</b> <b>${sellingPrice.toLocaleString()} ETB</b>\n` +
-                      `🔔 <b>Min Stock Alert:</b> <b>${minStockThreshold} units</b>\n\n` +
+                      `🏷 <b>Selling Price:</b> <b>${finalSellingPrice.toLocaleString()} ETB</b>\n` +
+                      `🔔 <b>Min Stock Alert:</b> <b>${minAlert} units</b>\n\n` +
                       `━━━━━━━━━━━━━━━━━━━━\n` +
                       `✅ <b>APPROVED by ${reviewerName} at ${nowTime}</b>\n` +
-                      `<i>Stock received and product catalog updated automatically.</i>`,
+                      `<i>Stock added and catalog updated automatically.</i>`,
                     parse_mode: "HTML",
                     reply_markup: { inline_keyboard: [] },
                   }),
@@ -447,23 +453,21 @@ http.route({
               }
             }
 
-            // Send confirmation message
-            const itemNames = (req.items || [])
-              .map((it: any) => `${it.productName} (x${it.quantity})`)
-              .join(", ");
+            // Send confirmation message to owner
+            const confirmText =
+              `🎉 <b>Stock Intake Approved & Saved!</b>\n\n` +
+              `• <b>Item:</b> ${firstItem?.productName || "Product"}\n` +
+              `• <b>Quantity:</b> <code>+${firstItem?.quantity || 0}</code> ${firstItem?.unit || "units"}\n` +
+              `• <b>Retail Selling Price:</b> ${finalSellingPrice.toLocaleString()} ETB\n` +
+              `• <b>Min Stock Alert:</b> ${minAlert} units\n\n` +
+              `✅ Stock is immediately available in <b>${req.destinationLocationName || "Store"}</b>.`;
 
             await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
                 chat_id: chatId,
-                text:
-                  `🎉 <b>Direct Purchase Approved Successfully!</b>\n\n` +
-                  `📦 <b>Product:</b> ${itemNames}\n` +
-                  `🏷 <b>Selling Price:</b> <b>${sellingPrice.toLocaleString()} ETB</b>\n` +
-                  `🔔 <b>Min Stock Alert:</b> <b>${minStockThreshold} units</b>\n` +
-                  `📥 <b>Stock Location:</b> ${req.destinationLocationName || "Store"}\n\n` +
-                  `✅ Stock added to inventory and pricing is live in OMESTOCK.`,
+                text: confirmText,
                 parse_mode: "HTML",
               }),
             });

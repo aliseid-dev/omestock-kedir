@@ -176,10 +176,52 @@ export const getStaff = query({
 
 // Owner Approves Pending Salesperson
 export const approveStaff = mutation({
-  args: { staffId: v.id("users") },
+  args: {
+    staffId: v.id("users"),
+    storeId: v.optional(v.string()),
+    storeName: v.optional(v.string()),
+    role: v.optional(v.union(v.literal("owner"), v.literal("admin"), v.literal("salesperson"))),
+  },
   handler: async (ctx, args) => {
-    await ctx.db.patch(args.staffId, { status: "approved" });
+    const patch: any = { status: "approved" };
+    if (args.storeId) patch.storeId = args.storeId;
+    if (args.storeName) patch.storeName = args.storeName;
+    if (args.role) patch.role = args.role;
+    await ctx.db.patch(args.staffId, patch);
     return true;
+  },
+});
+
+// Owner Updates Staff Member Profile, Role, and Permissions
+export const updateStaffMember = mutation({
+  args: {
+    staffId: v.id("users"),
+    name: v.optional(v.string()),
+    role: v.union(v.literal("owner"), v.literal("admin"), v.literal("salesperson")),
+    status: v.union(v.literal("approved"), v.literal("pending"), v.literal("rejected")),
+    storeId: v.optional(v.string()),
+    storeName: v.optional(v.string()),
+    allowCreditSales: v.optional(v.boolean()),
+    canManageStock: v.optional(v.boolean()),
+    canManageStaff: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db.get(args.staffId);
+    if (!existing) throw new Error("Staff member not found");
+
+    const patch: any = {
+      role: args.role,
+      status: args.status,
+    };
+    if (args.name !== undefined) patch.name = args.name.trim();
+    if (args.storeId !== undefined) patch.storeId = args.storeId;
+    if (args.storeName !== undefined) patch.storeName = args.storeName;
+    if (args.allowCreditSales !== undefined) patch.allowCreditSales = args.allowCreditSales;
+    if (args.canManageStock !== undefined) patch.canManageStock = args.canManageStock;
+    if (args.canManageStaff !== undefined) patch.canManageStaff = args.canManageStaff;
+
+    await ctx.db.patch(args.staffId, patch);
+    return await ctx.db.get(args.staffId);
   },
 });
 

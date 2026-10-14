@@ -48,6 +48,7 @@ export const dispatchTelegramApproval = action({
     paymentMethod: v.optional(v.string()),
     supplierName: v.optional(v.string()),
     notes: v.optional(v.string()),
+    isNewItem: v.optional(v.boolean()),
     botToken: v.optional(v.string()),
     chatId: v.optional(v.string()),
   },
@@ -88,49 +89,54 @@ export const dispatchTelegramApproval = action({
     if (DEFAULT_CHAT_ID) recipientChatIds.add(DEFAULT_CHAT_ID);
 
     const isTransfer = args.type === "transfer";
-    const title = isTransfer
-      ? "📦 <b>NEW STOCK TRANSFER REQUEST</b>"
-      : "🛒 <b>NEW DIRECT PURCHASE REQUEST</b>";
+    const isNewItem = Boolean(
+      args.isNewItem ||
+        args.notes?.toLowerCase().includes("new item") ||
+        args.notes?.toLowerCase().includes("new_item")
+    );
 
-    let message = `${title}\n\n`;
-    message += `👤 <b>Requested By:</b> ${args.requestedByName}\n`;
+    let title = isTransfer
+      ? "STOCK TRANSFER REQUEST"
+      : isNewItem
+      ? "NEW ITEM ADDED TO STOCK"
+      : "ITEM RESTOCKED";
+
+    let message = `<b>${title}</b>\n\n`;
+    message += `<b>${isNewItem ? "Added By" : isTransfer ? "Requested By" : "Restocked By"}:</b> ${args.requestedByName}\n`;
 
     if (isTransfer) {
-      message += `📤 <b>From:</b> ${args.sourceName || "Warehouse"}\n`;
-      message += `📥 <b>To:</b> ${args.destinationName || "Store"}\n`;
+      message += `<b>From:</b> ${args.sourceName || "Warehouse"}\n`;
+      message += `<b>To:</b> ${args.destinationName || "Store"}\n`;
     } else {
-      message += `📥 <b>Destination:</b> ${args.destinationName || "Store"}\n`;
-      if (args.supplierName) {
-        message += `🏢 <b>Supplier:</b> ${args.supplierName}\n`;
-      }
+      message += `<b>Location:</b> ${args.destinationName || "Store"}\n`;
       if (args.paymentMethod) {
-        message += `💳 <b>Payment:</b> ${args.paymentMethod}\n`;
+        message += `<b>Payment:</b> ${args.paymentMethod}\n`;
+      }
+      if (args.supplierName) {
+        message += `<b>Reference:</b> ${args.supplierName}\n`;
       }
       if (args.totalCost !== undefined && args.totalCost > 0) {
-        message += `💰 <b>Total Amount:</b> ${args.totalCost.toLocaleString()} ETB\n`;
+        message += `<b>Total Cost:</b> ${args.totalCost.toLocaleString()} ETB\n`;
+      }
+      message += `<b>Min Stock Alert:</b> 3 units (default)\n`;
+    }
+
+    message += `\n<b>Items:</b>\n${args.itemsSummary}\n`;
+
+    if (args.notes) {
+      const cleanNotes = args.notes.replace(/\[(New Item|Category:[^\]]+)\]/gi, "").trim();
+      if (cleanNotes) {
+        message += `\n<b>Note:</b> <i>${cleanNotes}</i>\n`;
       }
     }
 
-    message += `\n📋 <b>Items:</b>\n${args.itemsSummary}\n`;
-
-    if (args.notes) {
-      message += `\n📝 <b>Notes:</b> <i>${args.notes}</i>\n`;
-    }
-
-    message += `\n⏰ <i>Sent at ${new Date().toLocaleTimeString()}</i>\n`;
-    message += `\n👉 <b>Please review and choose an action below:</b>`;
+    message += `\n<i>Time: ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</i>\n`;
 
     const inlineKeyboard = {
       inline_keyboard: [
         [
-          {
-            text: "✅ Approve",
-            callback_data: `approve:${args.requestId}`,
-          },
-          {
-            text: "❌ Reject",
-            callback_data: `reject:${args.requestId}`,
-          },
+          { text: "Approve", callback_data: `approve:${args.requestId}` },
+          { text: "Reject", callback_data: `reject:${args.requestId}` },
         ],
       ],
     };
@@ -266,6 +272,174 @@ export const ensureTelegramWebhook = action({
     } catch (err: any) {
       return { success: false, error: err.message };
     }
+  },
+});
+
+// Dispatch Telegram notification when an item/product is edited
+export const dispatchItemEditedNotification = action({
+  args: {
+    productName: v.string(),
+    category: v.optional(v.string()),
+    locationName: v.optional(v.string()),
+    editedByName: v.string(),
+    editedByRole: v.optional(v.string()),
+    changesSummary: v.string(),
+    botToken: v.optional(v.string()),
+    chatId: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const token = args.botToken || process.env.TELEGRAM_BOT_TOKEN || DEFAULT_BOT_TOKEN;
+
+    const recipientChatIds = new Set<string>();
+
+    try {
+      const subscribers = await ctx.runQuery(api.approvals.getActiveTelegramSubscribers);
+      if (Array.isArray(subscribers)) {
+        subscribers.forEach((s: any) => {
+          if (s.chatId) recipientChatIds.add(String(s.chatId));
+        });
+      }
+    } catch (subErr) {
+      console.warn("Failed to query subscribers:", subErr);
+    }
+
+    if (args.chatId) recipientChatIds.add(String(args.chatId));
+    if (process.env.TELEGRAM_OWNER_CHAT_ID) recipientChatIds.add(String(process.env.TELEGRAM_OWNER_CHAT_ID));
+    if (DEFAULT_CHAT_ID) recipientChatIds.add(DEFAULT_CHAT_ID);
+
+    const nowStr = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    const roleStr = args.editedByRole ? ` (${args.editedByRole})` : "";
+
+    let message = `<b>ITEM EDITED</b>\n\n`;
+    message += `<b>Item:</b> ${args.productName}\n`;
+    if (args.locationName) {
+      message += `<b>Location:</b> ${args.locationName}\n`;
+    }
+    if (args.category) {
+      message += `<b>Category:</b> ${args.category}\n`;
+    }
+    message += `<b>Edited By:</b> ${args.editedByName}${roleStr}\n\n`;
+    message += `<b>Changes:</b>\n${args.changesSummary}\n\n`;
+    message += `<i>Time: ${nowStr}</i>`;
+
+    let anySuccess = false;
+    let lastError: string | null = null;
+
+    for (const targetChatId of recipientChatIds) {
+      try {
+        const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            chat_id: targetChatId,
+            text: message,
+            parse_mode: "HTML",
+          }),
+        });
+
+        const data = await res.json();
+        if (data.ok) {
+          anySuccess = true;
+        } else {
+          lastError = data.description || "Telegram API rejected message";
+          console.warn(`Failed to send edit notification to chat ${targetChatId}:`, data);
+        }
+      } catch (err: any) {
+        lastError = err.message;
+        console.error(`Error sending edit notification to ${targetChatId}:`, err);
+      }
+    }
+
+    return {
+      success: anySuccess,
+      recipientsCount: recipientChatIds.size,
+      error: anySuccess ? null : lastError,
+    };
+  },
+});
+
+// Action to dispatch Telegram notification when a staff member's commission is settled
+export const dispatchTelegramCommissionSettledNotificationAction = action({
+  args: {
+    staffName: v.string(),
+    amount: v.number(),
+    salesCount: v.number(),
+    paymentMethod: v.string(),
+    settledByName: v.string(),
+    reference: v.optional(v.string()),
+    notes: v.optional(v.string()),
+    botToken: v.optional(v.string()),
+    chatId: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const token = args.botToken || process.env.TELEGRAM_BOT_TOKEN || DEFAULT_BOT_TOKEN;
+    const recipientChatIds = new Set<string>();
+
+    try {
+      const subscribers = await ctx.runQuery(api.approvals.getTelegramSubscribers);
+      if (Array.isArray(subscribers)) {
+        subscribers.forEach((sub: any) => {
+          if (sub.chatId) recipientChatIds.add(String(sub.chatId));
+        });
+      }
+    } catch (subErr) {
+      console.warn("Failed to query subscribers for commission notification:", subErr);
+    }
+
+    if (args.chatId) recipientChatIds.add(String(args.chatId));
+    if (process.env.TELEGRAM_OWNER_CHAT_ID) recipientChatIds.add(String(process.env.TELEGRAM_OWNER_CHAT_ID));
+    if (DEFAULT_CHAT_ID) recipientChatIds.add(DEFAULT_CHAT_ID);
+
+    const nowStr = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+    let message = `✅ <b>STAFF COMMISSION SETTLED</b>\n\n`;
+    message += `<b>Staff Member:</b> ${args.staffName}\n`;
+    message += `<b>Amount Paid:</b> ${args.amount.toLocaleString()} ETB\n`;
+    message += `<b>Transactions Settled:</b> ${args.salesCount} sales\n`;
+    message += `<b>Payment Method:</b> ${args.paymentMethod}\n`;
+    if (args.reference) {
+      message += `<b>Reference #:</b> ${args.reference}\n`;
+    }
+    if (args.notes) {
+      message += `<b>Notes:</b> ${args.notes}\n`;
+    }
+    message += `<b>Settled By:</b> ${args.settledByName}\n\n`;
+    message += `<i>Status: Cleared & Paid to Staff</i>\n`;
+    message += `<i>Time: ${nowStr}</i>`;
+
+    let anySuccess = false;
+    let lastError: string | null = null;
+
+    for (const targetChatId of recipientChatIds) {
+      try {
+        const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            chat_id: targetChatId,
+            text: message,
+            parse_mode: "HTML",
+          }),
+        });
+
+        const data = await res.json();
+        if (data.ok) {
+          anySuccess = true;
+        } else {
+          lastError = data.description || "Telegram API rejected message";
+          console.warn(`Failed to send commission settlement notification to chat ${targetChatId}:`, data);
+        }
+      } catch (err: any) {
+        lastError = err.message;
+        console.error(`Error sending commission notification to ${targetChatId}:`, err);
+      }
+    }
+
+    return {
+      success: anySuccess,
+      recipientsCount: recipientChatIds.size,
+      error: anySuccess ? null : lastError,
+    };
   },
 });
 

@@ -75,3 +75,77 @@ export function generateCompanyCode() {
   return code
 }
 
+/**
+ * Normalizes and formats a product ID code.
+ * Strips '#' and spaces, extracts numeric digits and automatically adds the 'SP-' prefix.
+ * e.g., "999" -> "SP-999"
+ * e.g., "#sp-999" -> "SP-999"
+ * e.g., "SP-999" -> "SP-999"
+ * e.g., "sp999" -> "SP-999"
+ */
+export function formatProductCode(rawCode) {
+  if (!rawCode) return ''
+  const str = String(rawCode).trim()
+  // Extract all numeric digits
+  const digits = str.replace(/\D/g, '')
+  if (digits) {
+    return `SP-${digits}`
+  }
+  // Fallback for non-digit codes if any
+  const cleaned = str.replace(/^#+/g, '').replace(/^sp-?/i, '').trim()
+  return cleaned ? `SP-${cleaned}` : ''
+}
+
+/**
+ * Extracts ONLY digits from a product code for numeric-only input fields.
+ * e.g., "SP-999" -> "999"
+ * e.g., "#sp-999" -> "999"
+ * e.g., "999" -> "999"
+ */
+export function extractProductCodeDigits(rawCode) {
+  if (!rawCode) return ''
+  return String(rawCode).replace(/\D/g, '')
+}
+
+/**
+ * Comprehensive product search matching for names, categories, and codes.
+ * Matches when user searches numeric digits (e.g. "999"), prefix format ("SP-999" or "sp-999"),
+ * or partial name/category text.
+ */
+export function matchesProductSearch(product, rawQuery) {
+  if (!rawQuery || !rawQuery.trim()) return true
+  const q = rawQuery.trim().toLowerCase()
+  if (!product) return false
+
+  // 1. Direct name match
+  if (product.name && product.name.toLowerCase().includes(q)) return true
+
+  // 2. Category match
+  if (product.category && product.category.toLowerCase().includes(q)) return true
+
+  // 3. Notes match
+  if (product.notes && product.notes.toLowerCase().includes(q)) return true
+
+  // 4. Product code / ID match
+  if (product.code) {
+    const rawCode = String(product.code).toLowerCase()
+    // Direct substring match
+    if (rawCode.includes(q)) return true
+
+    // Alphanumeric clean match (e.g. "sp999" matches "sp-999" or "SP-999")
+    const cleanCode = rawCode.replace(/[^a-z0-9]/g, '')
+    const cleanQ = q.replace(/[^a-z0-9]/g, '')
+    if (cleanCode && cleanQ && (cleanCode.includes(cleanQ) || cleanQ.includes(cleanCode))) return true
+
+    // Numeric digits match (e.g. searching "999" matches "SP-999" or "#sp-999")
+    const codeDigits = rawCode.replace(/\D/g, '')
+    const qDigits = q.replace(/\D/g, '')
+    if (codeDigits && qDigits && (codeDigits.includes(qDigits) || qDigits.includes(codeDigits))) return true
+  }
+
+  // 5. Product compatibility ID match (e.g. Mongo/Convex _id)
+  if (product.id && typeof product.id === 'string' && product.id.toLowerCase().includes(q)) return true
+
+  return false
+}
+

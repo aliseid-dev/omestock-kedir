@@ -18,9 +18,16 @@ export default defineSchema({
     userId: v.string(), // Clerk User ID (e.g. user_2...)
     name: v.string(),
     email: v.string(),
-    role: v.union(v.literal("owner"), v.literal("salesperson")),
+    role: v.union(v.literal("owner"), v.literal("admin"), v.literal("salesperson")),
     status: v.union(v.literal("approved"), v.literal("pending"), v.literal("rejected")),
     clientId: v.id("clients"),
+    storeId: v.optional(v.string()),
+    storeName: v.optional(v.string()),
+    allowCreditSales: v.optional(v.boolean()),
+    canManageStock: v.optional(v.boolean()),
+    canManageStaff: v.optional(v.boolean()),
+    lastCommissionSettledAt: v.optional(v.string()),
+    totalCommissionSettled: v.optional(v.number()),
     createdAt: v.string(),
   })
     .index("by_userId", ["userId"])
@@ -90,11 +97,32 @@ export default defineSchema({
     staffId: v.string(),
     staffName: v.string(),
     commission: v.number(),
+    commissionSettled: v.optional(v.boolean()),
+    commissionSettledAt: v.optional(v.string()),
+    commissionSettlementId: v.optional(v.string()),
     createdAt: v.string(),
     settledAt: v.optional(v.string()),
     settledPaymentMethod: v.optional(v.string()),
     settledBankProvider: v.optional(v.string()),
   }).index("by_clientId", ["clientId"]),
+
+  // Staff Commission Settlements / Payouts history
+  commissionSettlements: defineTable({
+    clientId: v.id("clients"),
+    staffId: v.string(),
+    staffName: v.string(),
+    amount: v.number(),
+    salesCount: v.number(),
+    paymentMethod: v.string(), // Cash | Banking | Telebirr
+    bankProvider: v.optional(v.string()),
+    reference: v.optional(v.string()),
+    notes: v.optional(v.string()),
+    settledByUserId: v.string(),
+    settledByUserName: v.string(),
+    createdAt: v.string(),
+  })
+    .index("by_clientId", ["clientId"])
+    .index("by_staffId", ["staffId"]),
 
   // Audit Logs (Real-time activity trail)
   auditLogs: defineTable({
@@ -124,6 +152,7 @@ export default defineSchema({
         productId: v.string(),
         productName: v.string(),
         productCode: v.optional(v.string()),
+        category: v.optional(v.string()),
         quantity: v.number(),
         costPerUnit: v.optional(v.number()),
         unit: v.optional(v.string()),
@@ -161,11 +190,13 @@ export default defineSchema({
     createdAt: v.string(),
   }).index("by_chatId", ["chatId"]),
 
-  // Interactive Telegram approval conversational sessions (Step 1: Min Alert, Step 2: Selling Price)
+  // Interactive Telegram approval conversational sessions (Step 1: Cost, Step 2: Selling, Step 3: Min Alert)
   telegramSessions: defineTable({
     chatId: v.string(),
     requestId: v.id("approvalRequests"),
-    step: v.union(v.literal("awaiting_min_alert"), v.literal("awaiting_selling_price")),
+    step: v.string(),
+    costPrice: v.optional(v.number()),
+    sellingPrice: v.optional(v.number()),
     minStockThreshold: v.optional(v.number()),
     originalMessageId: v.optional(v.number()),
     updatedAt: v.string(),

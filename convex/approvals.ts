@@ -17,6 +17,7 @@ export const createApprovalRequest = mutation({
         productId: v.string(),
         productName: v.string(),
         productCode: v.optional(v.string()),
+        category: v.optional(v.string()),
         quantity: v.number(),
         costPerUnit: v.optional(v.number()),
         unit: v.optional(v.string()),
@@ -333,20 +334,17 @@ export const approveRequest = mutation({
           (c) => c.productId === item.productId || c.productId === prodKey
         );
 
-        const costPrice =
-          (config?.costPrice !== undefined && config.costPrice > 0)
-            ? config.costPrice
-            : (item.costPerUnit || matchedProd?.costPrice || 0);
+        const costPrice = 0;
 
         const sellingPrice =
           (config?.sellingPrice !== undefined && config.sellingPrice > 0)
             ? config.sellingPrice
-            : (item.sellingPrice || matchedProd?.sellingPrice || (costPrice > 0 ? Math.round(costPrice * 1.25) : 30));
+            : (item.sellingPrice || matchedProd?.sellingPrice || 30);
 
         const minStockThreshold =
           (config?.minStockThreshold !== undefined && config.minStockThreshold > 0)
             ? config.minStockThreshold
-            : (item.minStockThreshold || matchedProd?.minStockThreshold || 5);
+            : (item.minStockThreshold || matchedProd?.minStockThreshold || 3);
 
         const unit = config?.unit || item.unit || matchedProd?.unit || "Piece";
 
@@ -359,20 +357,22 @@ export const approveRequest = mutation({
           await ctx.db.patch(matchedProd._id, {
             sellingPrice,
             minStockThreshold,
-            costPrice: costPrice > 0 ? costPrice : matchedProd.costPrice,
+            costPrice: 0,
             unit,
             defaultCommissionRate: matchedProd.defaultCommissionRate !== undefined ? matchedProd.defaultCommissionRate : defaultCommission,
           });
           prodKey = matchedProd._id;
         } else if (request.clientId && item.productName) {
+          const notesCategory = request.notes?.match(/\[Category:\s*([^\]]+)\]/i)?.[1]?.trim();
+          const finalCategory = (item as any).category?.trim() || notesCategory || "General";
           const newProdId = await ctx.db.insert("products", {
             clientId: request.clientId,
             name: item.productName.trim(),
             code: item.productCode?.trim() || undefined,
-            category: "General",
+            category: finalCategory,
             unit,
             sellingPrice,
-            costPrice,
+            costPrice: 0,
             defaultCommissionRate: defaultCommission,
             minStockThreshold,
             createdAt: now,
@@ -546,7 +546,9 @@ export const setTelegramSession = mutation({
   args: {
     chatId: v.string(),
     requestId: v.id("approvalRequests"),
-    step: v.union(v.literal("awaiting_min_alert"), v.literal("awaiting_selling_price")),
+    step: v.string(),
+    costPrice: v.optional(v.number()),
+    sellingPrice: v.optional(v.number()),
     minStockThreshold: v.optional(v.number()),
     originalMessageId: v.optional(v.number()),
   },
@@ -561,6 +563,8 @@ export const setTelegramSession = mutation({
       await ctx.db.patch(existing._id, {
         requestId: args.requestId,
         step: args.step,
+        costPrice: args.costPrice !== undefined ? args.costPrice : existing.costPrice,
+        sellingPrice: args.sellingPrice !== undefined ? args.sellingPrice : existing.sellingPrice,
         minStockThreshold: args.minStockThreshold !== undefined ? args.minStockThreshold : existing.minStockThreshold,
         originalMessageId: args.originalMessageId !== undefined ? args.originalMessageId : existing.originalMessageId,
         updatedAt: now,
@@ -571,6 +575,8 @@ export const setTelegramSession = mutation({
         chatId: args.chatId,
         requestId: args.requestId,
         step: args.step,
+        costPrice: args.costPrice,
+        sellingPrice: args.sellingPrice,
         minStockThreshold: args.minStockThreshold,
         originalMessageId: args.originalMessageId,
         updatedAt: now,

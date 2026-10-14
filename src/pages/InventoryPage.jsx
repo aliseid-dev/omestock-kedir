@@ -32,8 +32,6 @@ import {
   Landmark,
   Smartphone,
   Banknote,
-  Table as TableIcon,
-  LayoutGrid,
   Bell,
   Send,
   Clock,
@@ -42,7 +40,11 @@ import {
   FileSpreadsheet,
   UploadCloud,
   Zap,
-  RefreshCw
+  RefreshCw,
+  Settings,
+  ArrowDownToLine,
+  Building2,
+  Loader2
 } from 'lucide-react'
 import { useTenant } from '../context/TenantContext'
 import { useAuth } from '../context/AuthContext'
@@ -51,7 +53,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'
 import { Badge } from '../components/ui/Badge'
 import { Modal } from '../components/ui/Modal'
-import { formatCurrency } from '../lib/utils'
+import { formatCurrency, formatProductCode, extractProductCodeDigits, matchesProductSearch } from '../lib/utils'
 import { ETHIOPIAN_PAYMENT_PROVIDERS, DEFAULT_BANK } from '../lib/ethiopian-banks'
 import { parseInventoryExcel, PRELOADED_KAYA_YASMIN_ITEMS } from '../lib/excel-importer'
 
@@ -89,13 +91,7 @@ function SearchableProductSelect({
   const selectedProduct = products.find(p => p.id === value)
 
   const filtered = useMemo(() => {
-    if (!search.trim()) return products
-    const q = search.toLowerCase().trim()
-    return products.filter(p => 
-      p.name?.toLowerCase().includes(q) || 
-      p.code?.toLowerCase().includes(q) ||
-      p.category?.toLowerCase().includes(q)
-    )
+    return products.filter(p => matchesProductSearch(p, search))
   }, [products, search])
 
   useEffect(() => {
@@ -232,6 +228,139 @@ function SearchableProductSelect({
   )
 }
 
+const ProductSearchSelector = SearchableProductSelect
+
+function CategorySearchSelector({
+  categories = [],
+  value = '',
+  onChange,
+  placeholder = 'Select or search category...',
+  className = '',
+}) {
+  const [isOpen, setIsOpen] = useState(false)
+  const [search, setSearch] = useState('')
+  const dropdownRef = useRef(null)
+
+  const filtered = useMemo(() => {
+    if (!search.trim()) return categories
+    const q = search.toLowerCase().trim()
+    return categories.filter((c) => c.toLowerCase().includes(q))
+  }, [categories, search])
+
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+        setIsOpen(false)
+      }
+    }
+    if (isOpen) {
+      document.addEventListener('mousedown', handleClickOutside)
+      document.addEventListener('touchstart', handleClickOutside)
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+      document.removeEventListener('touchstart', handleClickOutside)
+    }
+  }, [isOpen])
+
+  const hasExactMatch = categories.some(
+    (c) => c.toLowerCase().trim() === search.toLowerCase().trim()
+  )
+
+  return (
+    <div className={`relative ${className}`} ref={dropdownRef}>
+      {/* Trigger Button */}
+      <button
+        type="button"
+        onClick={() => {
+          setIsOpen(!isOpen)
+          setSearch('')
+        }}
+        className="w-full bg-white border border-slate-300 hover:border-slate-400 rounded-xl text-left flex items-center justify-between gap-2 p-2.5 min-h-[44px] transition-all cursor-pointer shadow-2xs focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+      >
+        {value ? (
+          <span className="font-bold text-slate-900 text-sm truncate">{value}</span>
+        ) : (
+          <span className="text-slate-400 text-sm font-medium">{placeholder}</span>
+        )}
+        <ChevronDown className={`w-4 h-4 text-slate-400 shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+      </button>
+
+      {/* Dropdown Menu */}
+      {isOpen && (
+        <div className="absolute left-0 right-0 top-full mt-1.5 bg-white border border-slate-200 rounded-2xl shadow-xl z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-100">
+          {/* Search Input */}
+          <div className="p-2 border-b border-slate-100 bg-slate-50/90 sticky top-0 z-10">
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                autoFocus
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Type to search category..."
+                className="w-full pl-8 pr-7 py-2 bg-white border border-slate-200 rounded-lg text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-slate-900/10 text-slate-900"
+              />
+              {search && (
+                <button
+                  type="button"
+                  onClick={() => setSearch('')}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-slate-400 hover:text-slate-600 cursor-pointer"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Categories List */}
+          <div className="max-h-56 overflow-y-auto divide-y divide-slate-100">
+            {search.trim() && !hasExactMatch && (
+              <button
+                type="button"
+                onClick={() => {
+                  onChange(search.trim())
+                  setIsOpen(false)
+                }}
+                className="w-full text-left p-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 flex items-center gap-2 transition-colors cursor-pointer border-b border-emerald-100"
+              >
+                <Plus className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
+                <span className="text-xs font-bold truncate">Use new category: "{search.trim()}"</span>
+              </button>
+            )}
+
+            {filtered.length === 0 && (!search.trim() || hasExactMatch) ? (
+              <div className="p-4 text-center text-xs text-slate-400">
+                No matching categories found
+              </div>
+            ) : (
+              filtered.map((cat) => {
+                const isSelected = cat === value
+                return (
+                  <button
+                    key={cat}
+                    type="button"
+                    onClick={() => {
+                      onChange(cat)
+                      setIsOpen(false)
+                    }}
+                    className={`w-full text-left p-2.5 hover:bg-slate-50 flex items-center justify-between gap-2 transition-colors cursor-pointer ${
+                      isSelected ? 'bg-slate-100/80 font-bold text-emerald-900' : 'text-slate-800'
+                    }`}
+                  >
+                    <span className="text-xs font-semibold truncate">{cat}</span>
+                    {isSelected && <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />}
+                  </button>
+                )
+              })
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function InventoryPage() {
   const {
     warehouses,
@@ -255,19 +384,238 @@ export function InventoryPage() {
     approveApprovalRequest,
     rejectApprovalRequest
   } = useTenant()
-  const { currentUser, isOwner } = useAuth()
+  const { currentUser, isOwner, permissions } = useAuth()
   const { toast } = useToast()
 
-  const [stockViewMode, setStockViewMode] = useState('table') // 'table' | 'cards'
   const [isSeeding, setIsSeeding] = useState(false)
   const [isApprovalsModalOpen, setIsApprovalsModalOpen] = useState(false)
   const [processingApprovalId, setProcessingApprovalId] = useState(null)
-  const [requireTelegramApproval, setRequireTelegramApproval] = useState(true)
+  const canDirectlyManageStock = isOwner || Boolean(currentUser?.canManageStock) || Boolean(permissions?.canManageStock)
   const [isSubmittingStorePurchase, setIsSubmittingStorePurchase] = useState(false)
   const [isSubmittingWarehousePurchase, setIsSubmittingWarehousePurchase] = useState(false)
   const [isSubmittingWarehouseAddProduct, setIsSubmittingWarehouseAddProduct] = useState(false)
   const [isSubmittingStoreAddProduct, setIsSubmittingStoreAddProduct] = useState(false)
   const [approvalConfigs, setApprovalConfigs] = useState({})
+  const [isRestockMenuOpen, setIsRestockMenuOpen] = useState(false)
+  const restockMenuRef = useRef(null)
+
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (restockMenuRef.current && !restockMenuRef.current.contains(e.target)) {
+        setIsRestockMenuOpen(false)
+      }
+    }
+    if (isRestockMenuOpen) {
+      document.addEventListener('mousedown', handleClickOutside)
+      document.addEventListener('touchstart', handleClickOutside)
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+      document.removeEventListener('touchstart', handleClickOutside)
+    }
+  }, [isRestockMenuOpen])
+
+  // Restock dedicated modal states
+  const [isRestockNewOpen, setIsRestockNewOpen] = useState(false)
+  const [isRestockExistingOpen, setIsRestockExistingOpen] = useState(false)
+  const [isSubmittingRestock, setIsSubmittingRestock] = useState(false)
+
+  const [restockNewForm, setRestockNewForm] = useState({
+    name: '',
+    category: 'General',
+    unit: 'Piece',
+    quantity: '10',
+    sellingPrice: '',
+    paymentMethod: 'Banking', // 'Banking' | 'Telebirr' | 'Cash'
+    bankProvider: 'cbe',
+    bankReference: '',
+    telebirrReference: '',
+  })
+
+  const [restockExistingForm, setRestockExistingForm] = useState({
+    productId: '',
+    quantity: '10',
+    sellingPrice: '',
+    paymentMethod: 'Banking',
+    bankProvider: 'cbe',
+    bankReference: '',
+    telebirrReference: '',
+  })
+
+  const productCategoryOptions = useMemo(() => {
+    const defaultCats = [
+      'General',
+      'oil',
+      'SPER',
+      'Oils & Lubricants',
+      'Spare Parts',
+      'Gas Cylinders',
+      'Filters',
+      'Coolants & Fluids',
+      'Batteries',
+      'Brake Systems',
+      'Engine Parts',
+      'Electrical',
+      'Suspension & Steering',
+      'Tires & Rims',
+      'Accessories',
+      'Body Parts',
+    ]
+    const set = new Set(defaultCats)
+    ;(products || []).forEach((p) => {
+      if (p.category && p.category.trim()) {
+        set.add(p.category.trim())
+      }
+    })
+    return Array.from(set).sort((a, b) => a.localeCompare(b))
+  }, [products])
+
+  const handleRestockNewSubmit = async (e) => {
+    e.preventDefault()
+    if (!restockNewForm.name.trim()) {
+      toast.error('Validation Error', 'Product name is required.')
+      return
+    }
+    const qty = parseFloat(restockNewForm.quantity)
+    if (!qty || qty <= 0) {
+      toast.error('Validation Error', 'Please enter a valid quantity greater than 0.')
+      return
+    }
+
+    setIsSubmittingRestock(true)
+    try {
+      const selectedBankObj = ETHIOPIAN_PAYMENT_PROVIDERS.find(p => p.id === restockNewForm.bankProvider)
+      const selectedBankName = selectedBankObj?.short || restockNewForm.bankProvider
+      const paymentDisplay = restockNewForm.paymentMethod === 'Banking'
+        ? `Banking (${selectedBankName})`
+        : restockNewForm.paymentMethod
+      const reference = restockNewForm.paymentMethod === 'Banking'
+        ? restockNewForm.bankReference?.trim()
+        : restockNewForm.paymentMethod === 'Telebirr'
+        ? restockNewForm.telebirrReference?.trim()
+        : ''
+
+      const selling = parseFloat(restockNewForm.sellingPrice) || 0
+
+      await submitDirectPurchaseRequest({
+        destinationLocationType: activeLocationType,
+        destinationLocationId: activeLocation.id,
+        destinationName: activeLocation.name,
+        items: [{
+          productId: 'new_item',
+          productName: restockNewForm.name.trim(),
+          category: restockNewForm.category,
+          unit: restockNewForm.unit,
+          quantity: qty,
+          costPerUnit: 0,
+          sellingPrice: selling,
+          minStockThreshold: 3,
+          isNewItem: true,
+        }],
+        totalCost: 0,
+        paymentMethod: paymentDisplay,
+        bankProvider: restockNewForm.paymentMethod === 'Banking' ? restockNewForm.bankProvider : undefined,
+        supplierName: reference ? `Ref: ${reference}` : undefined,
+        notes: `New item added by ${currentUser?.name || 'Salesperson'}`,
+        isNewItem: true,
+      })
+
+      setIsRestockNewOpen(false)
+      toast.info(
+        'Restock Request Sent',
+        `New item "${restockNewForm.name.trim()}" (+${qty} ${restockNewForm.unit}) sent to Owner for instant review & approval.`
+      )
+      setRestockNewForm({
+        name: '',
+        category: 'General',
+        unit: 'Piece',
+        quantity: '10',
+        sellingPrice: '',
+        paymentMethod: 'Banking',
+        bankProvider: 'cbe',
+        bankReference: '',
+        telebirrReference: '',
+      })
+    } catch (err) {
+      console.error('Failed to submit restock new item:', err)
+      toast.error('Restock Failed', err.message || 'Could not submit restock request.')
+    } finally {
+      setIsSubmittingRestock(false)
+    }
+  }
+
+  const handleRestockExistingSubmit = async (e) => {
+    e.preventDefault()
+    const selectedProd = products.find(p => p.id === restockExistingForm.productId)
+    if (!selectedProd) {
+      toast.error('Validation Error', 'Please search and select an existing product.')
+      return
+    }
+    const qty = parseFloat(restockExistingForm.quantity)
+    if (!qty || qty <= 0) {
+      toast.error('Validation Error', 'Please enter a valid quantity greater than 0.')
+      return
+    }
+
+    setIsSubmittingRestock(true)
+    try {
+      const selectedBankObj = ETHIOPIAN_PAYMENT_PROVIDERS.find(p => p.id === restockExistingForm.bankProvider)
+      const selectedBankName = selectedBankObj?.short || restockExistingForm.bankProvider
+      const paymentDisplay = restockExistingForm.paymentMethod === 'Banking'
+        ? `Banking (${selectedBankName})`
+        : restockExistingForm.paymentMethod
+      const reference = restockExistingForm.paymentMethod === 'Banking'
+        ? restockExistingForm.bankReference?.trim()
+        : restockExistingForm.paymentMethod === 'Telebirr'
+        ? restockExistingForm.telebirrReference?.trim()
+        : ''
+
+      const selling = parseFloat(restockExistingForm.sellingPrice) || selectedProd.sellingPrice || 0
+
+      await submitDirectPurchaseRequest({
+        destinationLocationType: activeLocationType,
+        destinationLocationId: activeLocation.id,
+        destinationName: activeLocation.name,
+        items: [{
+          productId: selectedProd.id,
+          productName: selectedProd.name,
+          category: selectedProd.category,
+          unit: selectedProd.unit || 'Piece',
+          quantity: qty,
+          costPerUnit: 0,
+          sellingPrice: selling,
+          minStockThreshold: 3,
+          isNewItem: false,
+        }],
+        totalCost: 0,
+        paymentMethod: paymentDisplay,
+        bankProvider: restockExistingForm.paymentMethod === 'Banking' ? restockExistingForm.bankProvider : undefined,
+        supplierName: reference ? `Ref: ${reference}` : undefined,
+        notes: `Restock by ${currentUser?.name || 'Salesperson'}`,
+        isNewItem: false,
+      })
+
+      setIsRestockExistingOpen(false)
+      toast.info(
+        'Restock Request Sent',
+        `Restock for "${selectedProd.name}" (+${qty} ${selectedProd.unit || 'units'}) sent to Owner for instant review & approval.`
+      )
+      setRestockExistingForm({
+        productId: '',
+        quantity: '10',
+        sellingPrice: '',
+        paymentMethod: 'Banking',
+        bankProvider: 'cbe',
+        bankReference: '',
+        telebirrReference: '',
+      })
+    } catch (err) {
+      console.error('Failed to submit restock existing item:', err)
+      toast.error('Restock Failed', err.message || 'Could not submit restock request.')
+    } finally {
+      setIsSubmittingRestock(false)
+    }
+  }
 
   // Excel Import & Clear Database States
   const [isImportExcelModalOpen, setIsImportExcelModalOpen] = useState(false)
@@ -287,10 +635,11 @@ export function InventoryPage() {
     const matchedProd = products?.find(
       (p) => p.id === it.productId || (it.productName && p.name?.toLowerCase().trim() === it.productName?.toLowerCase().trim())
     )
-    const cost = it.costPerUnit || matchedProd?.costPrice || 0
+    const cost = it.costPerUnit || matchedProd?.costPrice || 20
     const defaultSellingPrice = it.sellingPrice || matchedProd?.sellingPrice || (cost > 0 ? Math.round(cost * 1.25) : 30)
     const defaultMinStock = it.minStockThreshold || matchedProd?.minStockThreshold || 5
     return {
+      costPrice: cost,
       sellingPrice: defaultSellingPrice,
       minStockThreshold: defaultMinStock,
       unit: it.unit || matchedProd?.unit || 'Piece',
@@ -463,8 +812,7 @@ export function InventoryPage() {
         if (!isGas) return false
       }
 
-      const q = globalSearchQuery.toLowerCase().trim()
-      const matchesSearch = !q || p.name.toLowerCase().includes(q) || (p.category && p.category.toLowerCase().includes(q))
+      const matchesSearch = matchesProductSearch(p, globalSearchQuery)
       const matchesCategory = selectedCategory === 'ALL' || p.category === selectedCategory
       return matchesSearch && matchesCategory
     })
@@ -480,6 +828,7 @@ export function InventoryPage() {
   // Dedicated Warehouse Page States & Modals
   const [isWarehouseAddProductOpen, setIsWarehouseAddProductOpen] = useState(false)
   const [warehouseAddProductForm, setWarehouseAddProductForm] = useState({
+    code: '',
     name: '',
     category: 'General',
     unit: 'Piece',
@@ -501,6 +850,7 @@ export function InventoryPage() {
     bankReference: '',
     telebirrReference: '',
     supplierName: '',
+    newProductCode: '',
     newProductName: '',
     newProductCategory: 'General',
     newProductSellingPrice: '30',
@@ -517,6 +867,7 @@ export function InventoryPage() {
   // Dedicated Store Page States & Modals
   const [isStoreAddProductOpen, setIsStoreAddProductOpen] = useState(false)
   const [storeAddProductForm, setStoreAddProductForm] = useState({
+    code: '',
     name: '',
     category: 'General',
     unit: 'Piece',
@@ -538,6 +889,7 @@ export function InventoryPage() {
     bankReference: '',
     telebirrReference: '',
     supplierName: '',
+    newProductCode: '',
     newProductName: '',
     newProductCategory: 'General',
     newProductSellingPrice: '30',
@@ -566,6 +918,7 @@ export function InventoryPage() {
       quantity: '10',
       costPerUnit: products[0]?.costPrice || '20',
       unit: products[0]?.unit || 'Piece',
+      newProductCode: '',
       newProductName: '',
       newProductCategory: 'General',
       newProductSellingPrice: '30',
@@ -584,6 +937,7 @@ export function InventoryPage() {
         quantity: '10',
         costPerUnit: isNew ? '20' : (nextProd?.costPrice || '20'),
         unit: isNew ? 'Piece' : (nextProd?.unit || 'Piece'),
+        newProductCode: '',
         newProductName: '',
         newProductCategory: 'General',
         newProductSellingPrice: '30',
@@ -614,6 +968,7 @@ export function InventoryPage() {
   // Standalone Add Product Modal State
   const [isAddProductModalOpen, setIsAddProductModalOpen] = useState(false)
   const [standaloneProductForm, setStandaloneProductForm] = useState({
+    code: '',
     name: '',
     category: 'General',
     unit: 'Piece',
@@ -644,6 +999,7 @@ export function InventoryPage() {
     bankProvider: DEFAULT_BANK,
     supplierName: '',
     // New product fields
+    newProductCode: '',
     newProductName: '',
     newProductCategory: 'General',
     newProductSellingPrice: '30',
@@ -694,10 +1050,16 @@ export function InventoryPage() {
 
   const [productPricingForm, setProductPricingForm] = useState({
     productId: products[0]?.id || '',
+    code: products[0]?.code || '',
+    name: products[0]?.name || '',
+    category: products[0]?.category || 'General',
+    unit: products[0]?.unit || 'Piece',
+    quantity: 0,
+    initialQuantity: 0,
     sellingPrice: products[0]?.sellingPrice || 0,
     costPrice: products[0]?.costPrice || 0,
     defaultCommissionRate: products[0]?.defaultCommissionRate || 5,
-    minStockThreshold: products[0]?.minStockThreshold || 10,
+    minStockThreshold: products[0]?.minStockThreshold || 3,
   })
 
   const [newStoreForm, setNewStoreForm] = useState({
@@ -707,22 +1069,12 @@ export function InventoryPage() {
 
   // Filtered products for main inventory page
   const filteredProducts = useMemo(() => {
-    if (!globalSearchQuery.trim()) return products
-    const q = globalSearchQuery.toLowerCase()
-    return products.filter(p =>
-      p.name.toLowerCase().includes(q) ||
-      (p.category && p.category.toLowerCase().includes(q))
-    )
+    return products.filter(p => matchesProductSearch(p, globalSearchQuery))
   }, [products, globalSearchQuery])
 
   // Filtered products for Pricing Modal
   const pricingFilteredProducts = useMemo(() => {
-    if (!pricingSearchQuery.trim()) return products
-    const q = pricingSearchQuery.toLowerCase()
-    return products.filter(p =>
-      p.name.toLowerCase().includes(q) ||
-      (p.category && p.category.toLowerCase().includes(q))
-    )
+    return products.filter(p => matchesProductSearch(p, pricingSearchQuery))
   }, [products, pricingSearchQuery])
 
   // Active product in pricing editor
@@ -768,7 +1120,7 @@ export function InventoryPage() {
     const prod = products.find(p => p.id === prodId)
     const targetStore = stores.find(s => s.id === toStId) || stores[0]
 
-    if (!isOwner || requireTelegramApproval) {
+    if (!canDirectlyManageStock) {
       await submitTransferRequest({
         fromWarehouseId: fromWhId,
         toStoreId: toStId,
@@ -785,7 +1137,7 @@ export function InventoryPage() {
       setIsTransferModalOpen(false)
       toast.info(
         'Approval Request Sent',
-        `Transfer request for ${qty} unit${qty > 1 ? 's' : ''} sent to Owner on Telegram for review.`
+        `Transfer request for ${qty} unit${qty > 1 ? 's' : ''} sent to Owner for review.`
       )
       setTransferForm(prev => ({
         ...prev,
@@ -832,8 +1184,14 @@ export function InventoryPage() {
       toast.warning('Product Name Required', 'Please enter a product name.')
       return
     }
+    const numericCode = extractProductCodeDigits(warehouseAddProductForm.code)
+    if (!numericCode) {
+      toast.warning('Product ID Required', 'Please enter a numeric Product ID (e.g. 999).')
+      return
+    }
 
     const trimmedName = warehouseAddProductForm.name.trim()
+    const trimmedCode = `SP-${numericCode}`
     const qty = parseInt(warehouseAddProductForm.initialQuantity, 10)
     const cost = parseFloat(warehouseAddProductForm.costPrice) || 0
     const selling = parseFloat(warehouseAddProductForm.sellingPrice) || 0
@@ -849,7 +1207,7 @@ export function InventoryPage() {
     setIsSubmittingWarehouseAddProduct(true)
 
     try {
-      if (!isOwner || requireTelegramApproval) {
+      if (!canDirectlyManageStock) {
         const existing = products.find(p => p.name.toLowerCase() === trimmedName.toLowerCase())
         const targetProductId = existing ? existing.id : 'new_item'
         const targetProductName = existing ? existing.name : trimmedName
@@ -861,6 +1219,7 @@ export function InventoryPage() {
           items: [{
             productId: targetProductId,
             productName: targetProductName,
+            code: trimmedCode,
             quantity: qty > 0 ? qty : 1,
             costPerUnit: cost,
             unit: unit,
@@ -874,9 +1233,10 @@ export function InventoryPage() {
         setIsWarehouseAddProductOpen(false)
         toast.info(
           'Approval Request Sent',
-          `Stock addition request for "${targetProductName}" (${qty > 0 ? qty : 1} ${unit}) sent to Owner on Telegram for review.`
+          `Stock addition request for "${targetProductName}" (${qty > 0 ? qty : 1} ${unit}) sent to Owner for review.`
         )
         setWarehouseAddProductForm({
+          code: '',
           name: '',
           category: 'General',
           unit: 'Piece',
@@ -891,6 +1251,7 @@ export function InventoryPage() {
       // Owner direct addition
       const isOil = (trimmedName + ' ' + category).toLowerCase().includes('oil')
       const created = await createProduct({
+        code: trimmedCode,
         name: trimmedName,
         category: category,
         unit: unit,
@@ -906,6 +1267,7 @@ export function InventoryPage() {
         setIsWarehouseAddProductOpen(false)
         toast.success('Product Added', `"${created.name}" added to ${activeLocation.name}.`)
         setWarehouseAddProductForm({
+          code: '',
           name: '',
           category: 'General',
           unit: 'Piece',
@@ -965,7 +1327,13 @@ export function InventoryPage() {
           toast.warning('Product Name Required', 'Please enter a name for the new product.')
           return
         }
+        const numericCode = extractProductCodeDigits(newProductCode)
+        if (!numericCode) {
+          toast.warning('Product ID Required', 'Please enter a numeric Product ID (e.g. 999).')
+          return
+        }
         const trimmedName = newProductName.trim()
+        const trimmedCode = `SP-${numericCode}`
         const existing = products.find(p => p.name.toLowerCase() === trimmedName.toLowerCase())
         if (existing) {
           targetProductId = existing.id
@@ -974,6 +1342,7 @@ export function InventoryPage() {
         } else {
           const isOil = (trimmedName + ' ' + (newProductCategory || '')).toLowerCase().includes('oil')
           const created = await createProduct({
+            code: trimmedCode,
             name: trimmedName,
             category: newProductCategory?.trim() || 'General',
             unit: unit || 'Piece',
@@ -1016,7 +1385,7 @@ export function InventoryPage() {
         ? `${supplierName}${ref ? ` (Ref: ${ref})` : ''}`
         : (ref ? `Ref: ${ref}` : undefined)
 
-      if (!isOwner || requireTelegramApproval) {
+      if (!canDirectlyManageStock) {
         await submitDirectPurchaseRequest({
           destinationLocationType: 'warehouse',
           destinationLocationId: activeLocation.id,
@@ -1024,6 +1393,7 @@ export function InventoryPage() {
           items: [{
             productId: targetProductId,
             productName: targetProductName,
+            code: isWarehousePurchaseNewProduct && newProductCode ? newProductCode.trim() : undefined,
             quantity: qty,
             costPerUnit: cost,
             unit: targetProductUnit,
@@ -1038,7 +1408,7 @@ export function InventoryPage() {
         setIsWarehousePurchaseNewProduct(false)
         toast.info(
           'Approval Request Sent',
-          `Direct purchase request for ${qty} ${targetProductUnit} of "${targetProductName}" sent to Owner on Telegram for review.`
+          `Direct purchase request for ${qty} ${targetProductUnit} of "${targetProductName}" sent to Owner for review.`
         )
         setWarehouseDirectPurchaseForm(prev => ({
           ...prev,
@@ -1047,6 +1417,7 @@ export function InventoryPage() {
           supplierName: '',
           bankReference: '',
           telebirrReference: '',
+          newProductCode: '',
           newProductName: '',
         }))
         return
@@ -1080,6 +1451,7 @@ export function InventoryPage() {
           supplierName: '',
           bankReference: '',
           telebirrReference: '',
+          newProductCode: '',
           newProductName: '',
           newProductCategory: 'General',
           newProductSellingPrice: '30',
@@ -1124,7 +1496,7 @@ export function InventoryPage() {
     const targetSt = toStoreId ? stores.find(s => s.id === toStoreId) : null
     const destName = targetWh?.name || targetSt?.name || 'Destination'
 
-    if (!isOwner || requireTelegramApproval) {
+    if (!canDirectlyManageStock) {
       await submitTransferRequest({
         fromWarehouseId: activeLocation.id,
         toWarehouseId: toWarehouseId || undefined,
@@ -1141,7 +1513,7 @@ export function InventoryPage() {
       setIsWarehouseTransferOpen(false)
       toast.info(
         'Approval Request Sent',
-        `Transfer request for ${qty} unit${qty > 1 ? 's' : ''} sent to Owner on Telegram for review.`
+        `Transfer request for ${qty} unit${qty > 1 ? 's' : ''} sent to Owner for review.`
       )
       setWarehouseTransferForm(prev => ({
         ...prev,
@@ -1183,8 +1555,14 @@ export function InventoryPage() {
       toast.warning('Product Name Required', 'Please enter a product name.')
       return
     }
+    const numericCode = extractProductCodeDigits(storeAddProductForm.code)
+    if (!numericCode) {
+      toast.warning('Product ID Required', 'Please enter a numeric Product ID (e.g. 999).')
+      return
+    }
 
     const trimmedName = storeAddProductForm.name.trim()
+    const trimmedCode = `SP-${numericCode}`
     const qty = parseInt(storeAddProductForm.initialQuantity, 10)
     const cost = parseFloat(storeAddProductForm.costPrice) || 0
     const selling = parseFloat(storeAddProductForm.sellingPrice) || 0
@@ -1200,7 +1578,7 @@ export function InventoryPage() {
     setIsSubmittingStoreAddProduct(true)
 
     try {
-      if (!isOwner || requireTelegramApproval) {
+      if (!canDirectlyManageStock) {
         const existing = products.find(p => p.name.toLowerCase() === trimmedName.toLowerCase())
         const targetProductId = existing ? existing.id : 'new_item'
         const targetProductName = existing ? existing.name : trimmedName
@@ -1212,6 +1590,7 @@ export function InventoryPage() {
           items: [{
             productId: targetProductId,
             productName: targetProductName,
+            code: trimmedCode,
             quantity: qty > 0 ? qty : 1,
             costPerUnit: cost,
             unit: unit,
@@ -1225,9 +1604,10 @@ export function InventoryPage() {
         setIsStoreAddProductOpen(false)
         toast.info(
           'Approval Request Sent',
-          `Stock addition request for "${targetProductName}" (${qty > 0 ? qty : 1} ${unit}) sent to Owner on Telegram for review.`
+          `Stock addition request for "${targetProductName}" (${qty > 0 ? qty : 1} ${unit}) sent to Owner for review.`
         )
         setStoreAddProductForm({
+          code: '',
           name: '',
           category: 'General',
           unit: 'Piece',
@@ -1242,6 +1622,7 @@ export function InventoryPage() {
       // Owner direct addition
       const isOil = (trimmedName + ' ' + category).toLowerCase().includes('oil')
       const created = await createProduct({
+        code: trimmedCode,
         name: trimmedName,
         category: category,
         unit: unit,
@@ -1257,6 +1638,7 @@ export function InventoryPage() {
         setIsStoreAddProductOpen(false)
         toast.success('Product Added', `"${created.name}" added to ${activeLocation.name}.`)
         setStoreAddProductForm({
+          code: '',
           name: '',
           category: 'General',
           unit: 'Piece',
@@ -1315,7 +1697,13 @@ export function InventoryPage() {
           toast.warning('Product Name Required', 'Please enter a name for the new product.')
           return
         }
+        const numericCode = extractProductCodeDigits(storeDirectPurchaseForm.newProductCode)
+        if (!numericCode) {
+          toast.warning('Product ID Required', 'Please enter a numeric Product ID (e.g. 999).')
+          return
+        }
         const trimmedName = newProductName.trim()
+        const trimmedCode = `SP-${numericCode}`
         const existing = products.find(p => p.name.toLowerCase() === trimmedName.toLowerCase())
         if (existing) {
           targetProductId = existing.id
@@ -1324,6 +1712,7 @@ export function InventoryPage() {
         } else {
           const isOil = (trimmedName + ' ' + (newProductCategory || '')).toLowerCase().includes('oil')
           const created = await createProduct({
+            code: trimmedCode,
             name: trimmedName,
             category: newProductCategory?.trim() || 'General',
             unit: unit || 'Piece',
@@ -1366,7 +1755,7 @@ export function InventoryPage() {
         ? `${supplierName}${ref ? ` (Ref: ${ref})` : ''}`
         : (ref ? `Ref: ${ref}` : undefined)
 
-      if (!isOwner || requireTelegramApproval) {
+      if (!canDirectlyManageStock) {
         await submitDirectPurchaseRequest({
           destinationLocationType: activeLocationType || 'store',
           destinationLocationId: activeLocation.id,
@@ -1374,6 +1763,7 @@ export function InventoryPage() {
           items: [{
             productId: targetProductId,
             productName: targetProductName,
+            code: isStorePurchaseNewProduct && storeDirectPurchaseForm.newProductCode ? storeDirectPurchaseForm.newProductCode.trim() : undefined,
             quantity: qty,
             costPerUnit: cost,
             unit: targetProductUnit,
@@ -1388,7 +1778,7 @@ export function InventoryPage() {
         setIsStorePurchaseNewProduct(false)
         toast.info(
           'Approval Request Sent',
-          `Direct purchase request for ${qty} ${targetProductUnit} of "${targetProductName}" sent to Owner on Telegram for review.`
+          `Direct purchase request for ${qty} ${targetProductUnit} of "${targetProductName}" sent to Owner for review.`
         )
         setStoreDirectPurchaseForm(prev => ({
           ...prev,
@@ -1397,6 +1787,7 @@ export function InventoryPage() {
           supplierName: '',
           bankReference: '',
           telebirrReference: '',
+          newProductCode: '',
           newProductName: '',
         }))
         return
@@ -1430,8 +1821,8 @@ export function InventoryPage() {
           supplierName: '',
           bankReference: '',
           telebirrReference: '',
+          newProductCode: '',
           newProductName: '',
-          newProductCategory: 'General',
           newProductSellingPrice: '30',
         }))
       } else {
@@ -1474,7 +1865,7 @@ export function InventoryPage() {
     const targetSt = toStoreId ? stores.find(s => s.id === toStoreId) : null
     const destName = targetWh?.name || targetSt?.name || 'Destination'
 
-    if (!isOwner || requireTelegramApproval) {
+    if (!canDirectlyManageStock) {
       await submitTransferRequest({
         fromStoreId: activeLocation.id,
         toWarehouseId: toWarehouseId || undefined,
@@ -1491,7 +1882,7 @@ export function InventoryPage() {
       setIsStoreTransferOpen(false)
       toast.info(
         'Approval Request Sent',
-        `Transfer request for ${qty} unit${qty > 1 ? 's' : ''} sent to Owner on Telegram for review.`
+        `Transfer request for ${qty} unit${qty > 1 ? 's' : ''} sent to Owner for review.`
       )
       setStoreTransferForm(prev => ({
         ...prev,
@@ -1542,8 +1933,15 @@ export function InventoryPage() {
             toast.warning('Product Name Required', 'Please specify a product name for all new items in the purchase manifest.')
             return
           }
+          const numericCode = extractProductCodeDigits(it.newProductCode)
+          if (!numericCode) {
+            toast.warning('Product ID Required', `Please specify a numeric Product ID (e.g. 999) for "${it.newProductName || 'new item'}".`)
+            return
+          }
+          const formattedCode = `SP-${numericCode}`
           const isOil = ((it.newProductName || '') + ' ' + (it.newProductCategory || '')).toLowerCase().includes('oil')
           const created = await createProduct({
+            code: formattedCode,
             name: it.newProductName.trim(),
             category: it.newProductCategory?.trim() || 'General',
             unit: it.unit || 'Piece',
@@ -1559,6 +1957,7 @@ export function InventoryPage() {
           validItems.push({
             productId: created.id,
             productName: created.name,
+            code: formattedCode,
             quantity: qty,
             costPerUnit: parseFloat(it.costPerUnit) || 0,
             unit: it.unit || created.unit || 'Piece',
@@ -1570,6 +1969,7 @@ export function InventoryPage() {
           validItems.push({
             productId: it.productId,
             productName: prod?.name || it.productId,
+            code: prod?.code,
             quantity: qty,
             costPerUnit: parseFloat(it.costPerUnit) || 0,
             unit: it.unit || prod?.unit || 'Piece',
@@ -1584,7 +1984,7 @@ export function InventoryPage() {
         return
       }
 
-      if (!isOwner || requireTelegramApproval) {
+      if (!canDirectlyManageStock) {
         const st = stores.find(s => s.id === purchaseForm.storeId)
         await submitDirectPurchaseRequest({
           destinationLocationType: 'store',
@@ -1598,7 +1998,7 @@ export function InventoryPage() {
         setIsPurchaseModalOpen(false)
         toast.info(
           'Approval Request Sent',
-          `Direct purchase request for ${validItems.length} items sent to Owner on Telegram for review.`
+          `Direct purchase request for ${validItems.length} items sent to Owner for review.`
         )
         setBulkPurchaseItems([
           {
@@ -1608,6 +2008,7 @@ export function InventoryPage() {
             quantity: '10',
             costPerUnit: products[0]?.costPrice || '20',
             unit: products[0]?.unit || 'Piece',
+            newProductCode: '',
             newProductName: '',
             newProductCategory: 'General',
             newProductSellingPrice: '30'
@@ -1638,6 +2039,7 @@ export function InventoryPage() {
           quantity: '10',
           costPerUnit: products[0]?.costPrice || '20',
           unit: products[0]?.unit || 'Piece',
+          newProductCode: '',
           newProductName: '',
           newProductCategory: 'General',
           newProductSellingPrice: '30'
@@ -1656,8 +2058,15 @@ export function InventoryPage() {
         toast.warning('Product Name Required', 'Please enter a product name.')
         return
       }
+      const numericCode = extractProductCodeDigits(purchaseForm.newProductCode)
+      if (!numericCode) {
+        toast.warning('Product ID Required', 'Please enter a numeric Product ID (e.g. 999).')
+        return
+      }
+      const formattedCode = `SP-${numericCode}`
       const isOil = ((purchaseForm.newProductName || '') + ' ' + (purchaseForm.newProductCategory || '')).toLowerCase().includes('oil')
       const created = await createProduct({
+        code: formattedCode,
         name: purchaseForm.newProductName.trim(),
         category: purchaseForm.newProductCategory.trim() || 'General',
         unit: purchaseForm.unit || 'Piece',
@@ -1682,7 +2091,7 @@ export function InventoryPage() {
     const singleCost = parseFloat(isPurchaseCreatingNewProduct ? purchaseForm.newProductCostPrice : purchaseForm.costPerUnit) || 0
     const singleQty = parseInt(purchaseForm.quantity, 10) || 1
 
-    if (!isOwner || requireTelegramApproval) {
+    if (!canDirectlyManageStock) {
       const stObj = stores.find(s => s.id === purchaseForm.storeId)
       await submitDirectPurchaseRequest({
         destinationLocationType: 'store',
@@ -1691,6 +2100,7 @@ export function InventoryPage() {
         items: [{
           productId: targetProductId,
           productName: targetProductName,
+          code: isPurchaseCreatingNewProduct && purchaseForm.newProductCode ? `SP-${extractProductCodeDigits(purchaseForm.newProductCode)}` : undefined,
           quantity: singleQty,
           costPerUnit: singleCost,
           unit: targetProductUnit,
@@ -1706,12 +2116,13 @@ export function InventoryPage() {
       setIsPurchaseCreatingNewProduct(false)
       toast.info(
         'Approval Request Sent',
-        `Direct purchase request for ${singleQty} ${targetProductUnit} of "${targetProductName}" sent to Owner on Telegram for review.`
+        `Direct purchase request for ${singleQty} ${targetProductUnit} of "${targetProductName}" sent to Owner for review.`
       )
       setPurchaseForm(prev => ({
         ...prev,
         quantity: '10',
         supplierName: '',
+        newProductCode: '',
         newProductName: '',
       }))
       return
@@ -1743,6 +2154,7 @@ export function InventoryPage() {
       ...prev,
       quantity: '10',
       supplierName: '',
+      newProductCode: '',
       newProductName: '',
     }))
   }
@@ -1754,12 +2166,19 @@ export function InventoryPage() {
       toast.warning('Product Name Required', 'Please enter a product name.')
       return
     }
+    const numericCode = extractProductCodeDigits(standaloneProductForm.code)
+    if (!numericCode) {
+      toast.warning('Product ID Required', 'Please enter a numeric Product ID (e.g. 999).')
+      return
+    }
+    const trimmedCode = `SP-${numericCode}`
     const isOil = ((standaloneProductForm.name || '') + ' ' + (standaloneProductForm.category || '')).toLowerCase().includes('oil')
     const commissionRate = standaloneProductForm.defaultCommissionRate !== undefined && standaloneProductForm.defaultCommissionRate !== ''
       ? parseFloat(standaloneProductForm.defaultCommissionRate)
       : (isOil ? 0.5 : 2.5)
 
     const created = await createProduct({
+      code: trimmedCode,
       name: standaloneProductForm.name.trim(),
       category: standaloneProductForm.category.trim() || 'General',
       unit: standaloneProductForm.unit || 'Piece',
@@ -1780,7 +2199,7 @@ export function InventoryPage() {
         const whId = standaloneProductForm.initialDestinationId || warehouses[0]?.id
         const whObj = warehouses.find(w => w.id === whId)
         if (whId) {
-          if (!isOwner || requireTelegramApproval) {
+          if (!canDirectlyManageStock) {
             await submitDirectPurchaseRequest({
               destinationLocationType: 'warehouse',
               destinationLocationId: whId,
@@ -1788,6 +2207,7 @@ export function InventoryPage() {
               items: [{
                 productId: created.id,
                 productName: created.name,
+                code: trimmedCode,
                 quantity: initQty,
                 costPerUnit: parseFloat(standaloneProductForm.costPrice) || 0,
                 unit: standaloneProductForm.unit || created.unit || 'Piece',
@@ -1799,7 +2219,7 @@ export function InventoryPage() {
             })
             toast.info(
               'Stock Approval Request Sent',
-              `Initial stocking of ${initQty} units for "${created.name}" sent to Owner on Telegram for approval.`
+              `Initial stocking of ${initQty} units for "${created.name}" sent to Owner for approval.`
             )
           } else {
             await recordWarehouseInbound({
@@ -1816,7 +2236,7 @@ export function InventoryPage() {
         const stId = standaloneProductForm.initialDestinationId || stores[0]?.id
         const stObj = stores.find(s => s.id === stId)
         if (stId) {
-          if (!isOwner || requireTelegramApproval) {
+          if (!canDirectlyManageStock) {
             await submitDirectPurchaseRequest({
               destinationLocationType: 'store',
               destinationLocationId: stId,
@@ -1824,6 +2244,7 @@ export function InventoryPage() {
               items: [{
                 productId: created.id,
                 productName: created.name,
+                code: trimmedCode,
                 quantity: initQty,
                 costPerUnit: parseFloat(standaloneProductForm.costPrice) || 0,
                 unit: standaloneProductForm.unit || created.unit || 'Piece',
@@ -1835,7 +2256,7 @@ export function InventoryPage() {
             })
             toast.info(
               'Stock Approval Request Sent',
-              `Initial stocking of ${initQty} units for "${created.name}" sent to Owner on Telegram for approval.`
+              `Initial stocking of ${initQty} units for "${created.name}" sent to Owner for approval.`
             )
           } else {
             await recordDirectPurchase({
@@ -1854,6 +2275,7 @@ export function InventoryPage() {
     setIsAddProductModalOpen(false)
     toast.success('Product Created', `"${created.name}" created and added to catalog.`)
     setStandaloneProductForm({
+      code: '',
       name: '',
       category: 'General',
       sellingPrice: '30',
@@ -1892,45 +2314,83 @@ export function InventoryPage() {
   const handleOpenProductPricing = (prod) => {
     const target = prod || products[0]
     if (target) {
+      const curStock = activeLocation?.stock?.[target.id] ?? 0
       setProductPricingForm({
         productId: target.id,
-        sellingPrice: target.sellingPrice,
-        costPrice: target.costPrice,
+        code: extractProductCodeDigits(target.code || ''),
+        name: target.name || '',
+        category: target.category || 'General',
+        unit: target.unit || 'Piece',
+        quantity: curStock,
+        initialQuantity: curStock,
+        sellingPrice: target.sellingPrice ?? '',
+        costPrice: target.costPrice ?? 0,
         defaultCommissionRate: target.defaultCommissionRate || 5,
-        minStockThreshold: target.minStockThreshold || 10,
+        minStockThreshold: target.minStockThreshold || 3,
       })
     }
-    setPricingSearchQuery('')
     setPricingSavedToast(false)
     setIsProductPricingModalOpen(true)
   }
 
   // Select product inside pricing modal
   const handleSelectProductInPricing = (p) => {
+    const curStock = activeLocation?.stock?.[p.id] ?? 0
     setProductPricingForm({
       productId: p.id,
-      sellingPrice: p.sellingPrice,
-      costPrice: p.costPrice,
+      code: extractProductCodeDigits(p.code || ''),
+      name: p.name || '',
+      category: p.category || 'General',
+      unit: p.unit || 'Piece',
+      quantity: curStock,
+      initialQuantity: curStock,
+      sellingPrice: p.sellingPrice ?? '',
+      costPrice: p.costPrice ?? 0,
       defaultCommissionRate: p.defaultCommissionRate || 5,
-      minStockThreshold: p.minStockThreshold || 10,
+      minStockThreshold: p.minStockThreshold || 3,
     })
   }
 
-  const handleProductPricingSubmit = (e) => {
+  const handleProductPricingSubmit = async (e) => {
     e.preventDefault()
-    updateProduct(productPricingForm.productId, {
+    const numericCode = extractProductCodeDigits(productPricingForm.code)
+    if (!numericCode) {
+      toast.warning('Product ID Required', 'Please enter a numeric Product ID (e.g. 999).')
+      return
+    }
+    const finalCode = `SP-${numericCode}`
+    const prod = products.find(p => p.id === productPricingForm.productId)
+    const displayName = productPricingForm.name || prod?.name || 'Product'
+
+    const locationStockUpdate = activeLocation?.id ? {
+      locationId: activeLocation.id,
+      locationName: activeLocation.name || (activeLocationType === 'warehouse' ? 'Warehouse' : 'Store'),
+      locationType: activeLocationType,
+      oldQuantity: productPricingForm.initialQuantity ?? 0,
+      newQuantity: parseInt(productPricingForm.quantity, 10) || 0,
+    } : null
+
+    const success = await updateProduct(productPricingForm.productId, {
+      name: productPricingForm.name,
+      code: finalCode,
+      category: productPricingForm.category,
+      unit: productPricingForm.unit,
       sellingPrice: productPricingForm.sellingPrice,
       costPrice: productPricingForm.costPrice,
       defaultCommissionRate: productPricingForm.defaultCommissionRate,
       minStockThreshold: productPricingForm.minStockThreshold,
-    }, currentUser)
+    }, currentUser, locationStockUpdate)
     
-    const prod = products.find(p => p.id === productPricingForm.productId)
-    toast.success('Pricing Updated', `Saved prices and margins for "${prod?.name || 'Product'}".`)
-    setPricingSavedToast(true)
-    setTimeout(() => {
-      setPricingSavedToast(false)
-    }, 2500)
+    if (success) {
+      toast.success('Item Updated', `Saved changes for "${displayName}". Owner notified.`)
+      setPricingSavedToast(true)
+      setTimeout(() => {
+        setPricingSavedToast(false)
+        setIsProductPricingModalOpen(false)
+      }, 1200)
+    } else {
+      toast.error('Update Failed', 'Could not save item updates.')
+    }
   }
 
   // Add Store
@@ -2132,9 +2592,9 @@ export function InventoryPage() {
         /* VIEW 2: DEDICATED SINGLE LOCATION STOCK PAGE                          */
         /* ═════════════════════════════════════════════════════════════════════ */
         <div className="space-y-5 animate-in fade-in duration-200">
-          {/* Back Button & Location Title Bar */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-200">
-            <div>
+          {/* Back Button & Location Title Bar with Manage Dropdown */}
+          <div className="flex items-center justify-between gap-3 pb-3 border-b border-slate-200">
+            <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2 mb-1">
                 <button
                   type="button"
@@ -2145,7 +2605,7 @@ export function InventoryPage() {
                   <span>Locations</span>
                 </button>
               </div>
-              <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight leading-tight">
+              <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight leading-tight truncate">
                 {activeLocation.name}
               </h1>
               <p className="text-xs text-slate-500 font-medium mt-0.5">
@@ -2153,110 +2613,82 @@ export function InventoryPage() {
               </p>
             </div>
 
-            {/* Location Actions: Add Item, Direct Purchase, Transfer */}
-            <div className="grid grid-cols-2 sm:flex items-center gap-2 w-full sm:w-auto">
-              {activeLocationType === 'warehouse' ? (
-                <>
-                  <Button
-                    size="md"
-                    variant="primary"
-                    onClick={() => {
-                      setWarehouseAddProductForm({
-                        name: '',
-                        category: 'General',
-                        unit: 'Piece',
-                        sellingPrice: '30',
-                        costPrice: '20',
-                        initialQuantity: '10',
-                        minStockThreshold: '5',
-                      })
-                      setIsWarehouseAddProductOpen(true)
-                    }}
-                    className="w-full sm:w-auto bg-black hover:bg-slate-800 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 py-2.5 px-2 sm:px-4 rounded-xl cursor-pointer"
-                  >
-                    <Plus className="w-4 h-4 shrink-0" />
-                    <span>Add Item</span>
-                  </Button>
+            {/* Restock Intake Dropdown */}
+            <div className="relative shrink-0" ref={restockMenuRef}>
+              <button
+                type="button"
+                onClick={() => setIsRestockMenuOpen(prev => !prev)}
+                className="inline-flex items-center gap-1.5 px-3 py-2 sm:px-3.5 sm:py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs sm:text-sm font-bold shadow-xs active:scale-95 transition-all cursor-pointer"
+                aria-haspopup="true"
+                aria-expanded={isRestockMenuOpen}
+              >
+                <ArrowDownToLine className="w-4 h-4 shrink-0 text-emerald-400" />
+                <span>Restock</span>
+                <ChevronDown className={`w-3.5 h-3.5 text-slate-300 transition-transform duration-200 ${isRestockMenuOpen ? 'rotate-180' : ''}`} />
+              </button>
 
-                  <Button
-                    size="md"
-                    variant="outline"
-                    onClick={() => {
-                      const firstProd = products[0]
-                      setWarehouseDirectPurchaseForm(prev => ({
-                        ...prev,
-                        productId: firstProd?.id || '',
-                        quantity: '10',
-                        costPerUnit: firstProd?.costPrice || '20',
-                        paymentMethod: 'Banking',
-                        bankProvider: 'cbe',
-                        supplierName: '',
-                        bankReference: '',
-                        telebirrReference: '',
-                        newProductName: '',
-                        newProductCategory: 'General',
-                        newProductSellingPrice: '30',
-                      }))
-                      setIsWarehousePurchaseNewProduct(false)
-                      setIsWarehouseDirectPurchaseOpen(true)
-                    }}
-                    className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white border-transparent font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 py-2.5 px-2 sm:px-4 rounded-xl cursor-pointer shadow-xs"
-                  >
-                    <ShoppingBag className="w-4 h-4 shrink-0" />
-                    <span>Direct Purchase</span>
-                  </Button>
-                </>
-              ) : (
-                <>
-                  <Button
-                    size="md"
-                    variant="primary"
-                    onClick={() => {
-                      setStoreAddProductForm({
-                        name: '',
-                        category: 'General',
-                        unit: 'Piece',
-                        sellingPrice: '30',
-                        costPrice: '20',
-                        initialQuantity: '10',
-                        minStockThreshold: '5',
-                      })
-                      setIsStoreAddProductOpen(true)
-                    }}
-                    className="w-full sm:w-auto bg-black hover:bg-slate-800 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 py-2.5 px-2 sm:px-4 rounded-xl cursor-pointer"
-                  >
-                    <Plus className="w-4 h-4 shrink-0" />
-                    <span>Add Item</span>
-                  </Button>
+              {isRestockMenuOpen && (
+                <div className="absolute right-0 top-full mt-2 w-56 sm:w-64 bg-white rounded-2xl shadow-xl border border-slate-200/90 p-1.5 z-50 animate-in fade-in zoom-in-95 duration-150">
+                  <div className="px-3 py-2 border-b border-slate-100">
+                    <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Inventory Intake</p>
+                    <p className="text-xs font-bold text-slate-800 truncate">{activeLocation.name}</p>
+                  </div>
 
-                  <Button
-                    size="md"
-                    variant="outline"
-                    onClick={() => {
-                      const firstProd = products[0]
-                      setStoreDirectPurchaseForm(prev => ({
-                        ...prev,
-                        productId: firstProd?.id || '',
-                        quantity: '10',
-                        costPerUnit: firstProd?.costPrice || '20',
-                        paymentMethod: 'Banking',
-                        bankProvider: 'cbe',
-                        supplierName: '',
-                        bankReference: '',
-                        telebirrReference: '',
-                        newProductName: '',
-                        newProductCategory: 'General',
-                        newProductSellingPrice: '30',
-                      }))
-                      setIsStorePurchaseNewProduct(false)
-                      setIsStoreDirectPurchaseOpen(true)
-                    }}
-                    className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white border-transparent font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 py-2.5 px-2 sm:px-4 rounded-xl cursor-pointer shadow-xs"
-                  >
-                    <ShoppingBag className="w-4 h-4 shrink-0" />
-                    <span>Direct Purchase</span>
-                  </Button>
-                </>
+                  <div className="py-1 space-y-0.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsRestockMenuOpen(false)
+                        setRestockNewForm({
+                          name: '',
+                          category: 'General',
+                          unit: 'Piece',
+                          quantity: '10',
+                          paymentMethod: 'Banking',
+                          bankProvider: 'cbe',
+                          bankReference: '',
+                          telebirrReference: '',
+                        })
+                        setIsRestockNewOpen(true)
+                      }}
+                      className="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-emerald-50 active:bg-emerald-100 transition-colors cursor-pointer group"
+                    >
+                      <div className="w-8 h-8 rounded-lg bg-emerald-600 text-white flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform shadow-xs">
+                        <Plus className="w-4 h-4" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs font-bold text-slate-900 group-hover:text-emerald-950">New Item</div>
+                        <div className="text-[10px] text-slate-500 font-medium">Add brand new stock item</div>
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsRestockMenuOpen(false)
+                        const firstProd = products[0]
+                        setRestockExistingForm({
+                          productId: firstProd?.id || '',
+                          quantity: '10',
+                          paymentMethod: 'Banking',
+                          bankProvider: 'cbe',
+                          bankReference: '',
+                          telebirrReference: '',
+                        })
+                        setIsRestockExistingOpen(true)
+                      }}
+                      className="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-slate-50 active:bg-slate-100 transition-colors cursor-pointer group"
+                    >
+                      <div className="w-8 h-8 rounded-lg bg-slate-900 text-white flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform shadow-xs">
+                        <Package className="w-4 h-4" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs font-bold text-slate-900">Existing Item</div>
+                        <div className="text-[10px] text-slate-500 font-medium">Restock existing catalog product</div>
+                      </div>
+                    </button>
+                  </div>
+                </div>
               )}
             </div>
           </div>
@@ -2282,36 +2714,6 @@ export function InventoryPage() {
                     <X className="w-4 h-4" />
                   </button>
                 )}
-              </div>
-
-              {/* View Switcher Toggle */}
-              <div className="inline-flex rounded-xl p-0.5 bg-slate-100 border border-slate-200 shrink-0">
-                <button
-                  type="button"
-                  onClick={() => setStockViewMode('table')}
-                  className={`p-1.5 sm:px-2.5 sm:py-1 rounded-lg flex items-center gap-1 text-xs font-bold transition-all cursor-pointer ${
-                    stockViewMode === 'table'
-                      ? 'bg-white text-slate-900 shadow-xs'
-                      : 'text-slate-400 hover:text-slate-800'
-                  }`}
-                  title="Table View"
-                >
-                  <TableIcon className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Table</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setStockViewMode('cards')}
-                  className={`p-1.5 sm:px-2.5 sm:py-1 rounded-lg flex items-center gap-1 text-xs font-bold transition-all cursor-pointer ${
-                    stockViewMode === 'cards'
-                      ? 'bg-white text-slate-900 shadow-xs'
-                      : 'text-slate-400 hover:text-slate-800'
-                  }`}
-                  title="Card View"
-                >
-                  <LayoutGrid className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Cards</span>
-                </button>
               </div>
             </div>
 
@@ -2356,7 +2758,7 @@ export function InventoryPage() {
             <div className="text-center py-12 bg-white rounded-2xl border border-slate-200 text-slate-400 text-sm">
               No products found matching your search or category filter.
             </div>
-          ) : stockViewMode === 'table' ? (
+          ) : (
             /* ══════════════════════════════════════════════════════════════════ */
             /* TABLE DESIGN: Clean & Basic for Salesperson, Full for Owner        */
             /* ══════════════════════════════════════════════════════════════════ */
@@ -2371,15 +2773,14 @@ export function InventoryPage() {
                       <th className="py-3 px-2 sm:px-3 text-center">Stock</th>
                       <th className="py-3 px-2.5 sm:px-4">Price</th>
                       <th className="py-3 px-3 text-center hidden sm:table-cell">Status</th>
-                      {isOwner && (
+                      {isOwner ? (
                         <>
                           <th className="py-3 px-3 hidden lg:table-cell">Cost</th>
                           <th className="py-3 px-3 hidden lg:table-cell">Value</th>
                           <th className="py-3 px-2 sm:px-3.5 text-right">Actions</th>
                         </>
-                      )}
-                      {!isOwner && activeLocationType === 'store' && (
-                        <th className="py-3 px-2 text-right">Action</th>
+                      ) : (
+                        <th className="py-3 px-2 sm:px-3.5 text-right">Actions</th>
                       )}
                     </tr>
                   </thead>
@@ -2402,10 +2803,15 @@ export function InventoryPage() {
                                   {p.name}
                                 </span>
                               </div>
-                              <div className="flex items-center gap-1.5 text-[10px] text-slate-400 mt-0.5 sm:hidden">
-                                <span>{p.category || 'General'}</span>
-                                <span>&bull;</span>
-                                <span className="font-semibold text-slate-600">{p.unit || 'Pc'}</span>
+                              <div className="flex items-center gap-1.5 text-[10px] text-slate-400 mt-0.5 flex-wrap">
+                                {p.code && (
+                                  <span className="font-mono font-bold text-[9px] px-1.5 py-0.5 bg-slate-100 text-slate-700 rounded border border-slate-200/80 shrink-0">
+                                    {formatProductCode(p.code)}
+                                  </span>
+                                )}
+                                <span className="sm:hidden">{p.category || 'General'}</span>
+                                <span className="sm:hidden">&bull;</span>
+                                <span className="font-semibold text-slate-600 sm:hidden">{p.unit || 'Pc'}</span>
                               </div>
                             </div>
                           </td>
@@ -2475,41 +2881,29 @@ export function InventoryPage() {
                             </td>
                           )}
 
-                          {/* Owner Actions */}
-                          {isOwner && (
-                            <td className="py-2.5 px-2 sm:px-3.5 text-right">
-                              <div className="flex items-center justify-end gap-1">
-                                <button
-                                  type="button"
-                                  onClick={() => handleOpenProductPricing(p)}
-                                  title="Adjust Price"
-                                  className="p-1.5 text-emerald-700 hover:bg-emerald-50 rounded-lg transition-colors cursor-pointer"
-                                >
-                                  <Tags className="w-3.5 h-3.5" />
-                                </button>
+                          {/* Actions */}
+                          <td className="py-2.5 px-2 sm:px-3.5 text-right">
+                            <div className="flex items-center justify-end gap-1">
+                              <button
+                                type="button"
+                                onClick={() => handleOpenProductPricing(p)}
+                                title="Edit Item & Quantity"
+                                className="p-2 text-slate-500 hover:text-emerald-700 hover:bg-emerald-50 rounded-xl transition-all cursor-pointer border border-transparent hover:border-emerald-200"
+                              >
+                                <Edit3 className="w-4 h-4" />
+                              </button>
+                              {isOwner && (
                                 <button
                                   type="button"
                                   onClick={() => handleOpenOverride(activeLocation.id, activeLocation.name, activeLocationType, p.id, p.name, qty)}
                                   title="Stock Override"
-                                  className="p-1.5 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                                  className="p-1.5 text-slate-400 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
                                 >
                                   <SlidersHorizontal className="w-3.5 h-3.5" />
                                 </button>
-                              </div>
-                            </td>
-                          )}
-
-                          {/* Salesperson Action (Only in store) */}
-                          {!isOwner && activeLocationType === 'store' && (
-                            <td className="py-3 px-3 text-right">
-                              <a
-                                href={`/pos?store=${activeLocation.id}`}
-                                className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg transition-colors"
-                              >
-                                <span>Sell</span>
-                              </a>
-                            </td>
-                          )}
+                              )}
+                            </div>
+                          </td>
                         </tr>
                       )
                     })}
@@ -2517,201 +2911,119 @@ export function InventoryPage() {
                 </table>
               </div>
             </div>
-          ) : (
-            /* ══════════════════════════════════════════════════════════════════ */
-            /* CARDS DESIGN: Responsive Card Grid                                 */
-            /* ══════════════════════════════════════════════════════════════════ */
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4">
-              {locationFilteredProducts.map((p) => {
-                const qty = activeLocation.stock?.[p.id] || 0
-                const isLow = qty > 0 && qty <= (p.minStockThreshold || 5)
-                const isOut = qty === 0
-
-                return (
-                  <div
-                    key={p.id}
-                    className="p-4 rounded-2xl border border-slate-200 bg-white hover:border-slate-300 hover:shadow-xs transition-all flex flex-col justify-between"
-                  >
-                    <div>
-                      <div className="flex items-start justify-between gap-1.5">
-                        <div>
-                          <h4 className="text-sm font-bold text-slate-900 inline">{p.name}</h4>
-                        </div>
-                        <div className="flex flex-col items-end shrink-0">
-                          <span className="text-xs font-black text-emerald-700">
-                            {formatCurrency(p.sellingPrice)}
-                          </span>
-                          {p.sellingPriceRange && (
-                            <span className="text-[10px] font-bold text-amber-800 bg-amber-50 px-1 py-0.2 rounded border border-amber-200 mt-0.5">
-                              {p.sellingPriceRange}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2 mt-1 text-[11px] text-slate-400 font-medium">
-                        {isOwner && <span>Cost: {formatCurrency(p.costPrice)} &bull; </span>}
-                        {p.category && <span>{p.category} &bull; </span>}
-                        <span>{p.unit || 'Piece'}</span>
-                      </div>
-                    </div>
-
-                    <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between">
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-lg font-black text-slate-900">{qty}</span>
-                        {isOut ? (
-                          <Badge variant="danger" className="text-[10px]">Out</Badge>
-                        ) : isLow ? (
-                          <Badge variant="warning" className="text-[10px]">Low ({qty})</Badge>
-                        ) : (
-                          <span className="text-[11px] text-slate-400 font-medium">{p.unit || 'units'}</span>
-                        )}
-                      </div>
-
-                      {/* Owner Quick Actions */}
-                      {isOwner && (
-                        <div className="flex items-center gap-1">
-                          <button
-                            type="button"
-                            onClick={() => handleOpenProductPricing(p)}
-                            title="Adjust Price & Commission"
-                            className="px-2 py-1 text-[11px] font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 rounded-lg border border-emerald-200 flex items-center gap-1 cursor-pointer"
-                          >
-                            <Tags className="w-3 h-3 text-emerald-600" />
-                            <span>Price</span>
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => handleOpenOverride(activeLocation.id, activeLocation.name, activeLocationType, p.id, p.name, qty)}
-                            title="Stock Override"
-                            className="p-1.5 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg cursor-pointer"
-                          >
-                            <SlidersHorizontal className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      )}
-
-                      {!isOwner && activeLocationType === 'store' && (
-                        <a
-                          href={`/pos?store=${activeLocation.id}`}
-                          className="px-2.5 py-1 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg"
-                        >
-                          Sell
-                        </a>
-                      )}
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
           )}
         </div>
       )}
 
       {/* ========================================================================= */}
-      {/* 2. SEARCHABLE PRODUCT PRICING & COMMISSION ADJUSTMENT MODAL (OWNER ONLY) */}
+      {/* 2. ITEM & PRICING EDIT MODAL */}
       {/* ========================================================================= */}
       {isProductPricingModalOpen && (
         <Modal
           isOpen={isProductPricingModalOpen}
           onClose={() => setIsProductPricingModalOpen(false)}
-          title="Search & Adjust Product Pricing"
+          title={isOwner ? "Edit Item & Adjust Pricing" : "Edit Item"}
         >
           <div className="space-y-4 text-xs">
-            
-            {/* Live Search Bar for Products */}
-            <div>
-              <label className="block font-bold text-slate-700 mb-1">
-                Search Product to Adjust:
-              </label>
-              <div className="relative">
-                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
-                <input
-                  type="text"
-                  placeholder="Search product to adjust (e.g., Teff, Coffee)..."
-                  value={pricingSearchQuery}
-                  onChange={(e) => setPricingSearchQuery(e.target.value)}
-                  className="w-full text-xs pl-9 pr-8 py-2.5 bg-slate-50 border border-slate-300 rounded-xl font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 min-h-[44px]"
-                />
-                {pricingSearchQuery && (
-                  <button
-                    onClick={() => setPricingSearchQuery('')}
-                    className="absolute right-3 top-3 text-slate-400 hover:text-slate-600"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* Search Results List (Scrollable Cards) */}
-            <div className="space-y-1.5 max-h-[160px] overflow-y-auto pr-1">
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                Select Product ({pricingFilteredProducts.length} available):
-              </p>
-              {pricingFilteredProducts.length === 0 ? (
-                <div className="p-3 text-center text-slate-400 bg-slate-50 rounded-xl">
-                  No products found matching "{pricingSearchQuery}"
-                </div>
-              ) : (
-                pricingFilteredProducts.map(p => {
-                  const isSelected = p.id === productPricingForm.productId
-                  const totalStock = getTotalStock(p.id)
-                  return (
-                    <button
-                      key={p.id}
-                      type="button"
-                      onClick={() => handleSelectProductInPricing(p)}
-                      className={`w-full text-left p-2.5 rounded-xl border transition-all flex items-center justify-between touch-manipulation ${
-                        isSelected
-                          ? 'bg-emerald-50/80 border-emerald-500 ring-2 ring-emerald-500/20 shadow-xs'
-                          : 'bg-white border-slate-200 hover:border-slate-300'
-                      }`}
-                    >
-                      <div className="flex-1 pr-2">
-                        <div className="flex items-center gap-1.5">
-                          <span className={`font-bold ${isSelected ? 'text-emerald-950' : 'text-slate-900'}`}>
-                            {p.name}
-                          </span>
-                          {p.category && <span className="text-[10px] text-slate-400">&bull; {p.category}</span>}
-                        </div>
-                        <div className="text-[11px] text-slate-500 mt-0.5">
-                          Sell: <span className="font-semibold text-slate-800">{formatCurrency(p.sellingPrice)}</span> &bull; 
-                          Cost: {formatCurrency(p.costPrice)} &bull; 
-                          Comm: {p.defaultCommissionRate || 5}%
-                        </div>
-                      </div>
-                      <div className="text-right shrink-0">
-                        <Badge variant={totalStock > 0 ? 'success' : 'danger'} className="text-[10px]">
-                          {totalStock} in stock
-                        </Badge>
-                        {isSelected && (
-                          <div className="flex items-center justify-end text-[10px] text-emerald-700 font-bold mt-1">
-                            <Check className="w-3.5 h-3.5 mr-0.5" /> Selected
-                          </div>
-                        )}
-                      </div>
-                    </button>
-                  )
-                })
-              )}
-            </div>
-
-            {/* Active Product Form */}
-            {activePricingProduct && (
-              <form onSubmit={handleProductPricingSubmit} className="pt-2 border-t border-slate-200 space-y-3.5">
+            {activePricingProduct ? (
+              <form onSubmit={handleProductPricingSubmit} className="space-y-3.5">
                 
-                {/* Active Product Banner */}
+                {/* Active Product & Location Banner */}
                 <div className="p-3 bg-slate-900 text-white rounded-xl flex items-center justify-between">
                   <div>
-                    <div className="text-xs font-bold">{activePricingProduct.name}</div>
-                    <div className="text-[10px] text-slate-400">Total Stock: {getTotalStock(activePricingProduct.id)} units across all locations</div>
+                    <div className="text-xs font-bold text-white flex items-center gap-1.5">
+                      <span>{productPricingForm.name || activePricingProduct.name}</span>
+                      <span className="text-[10px] text-slate-400 font-normal">&bull; {formatProductCode(activePricingProduct.code) || activeLocation.name}</span>
+                    </div>
+                    <div className="text-[10px] text-slate-400 mt-0.5">
+                      Location: <span className="text-emerald-400 font-semibold">{activeLocation.name || 'Store'}</span> &bull; Current Stock: <span className="text-white font-bold">{activeLocation.stock?.[activePricingProduct.id] ?? 0} {productPricingForm.unit || 'units'}</span>
+                    </div>
                   </div>
-                  <Badge variant="purple" className="text-[10px]">Owner Override</Badge>
+                  <Badge variant={isOwner ? "purple" : "blue"} className="text-[10px] shrink-0">
+                    {isOwner ? 'Owner' : 'Staff Edit'}
+                  </Badge>
                 </div>
 
-                {/* Selling & Cost Price */}
+                {/* Product Name & Product ID */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                  <div className="sm:col-span-2">
+                    <label className="block font-bold text-slate-700 mb-1">Product Name *</label>
+                    <input
+                      type="text"
+                      required
+                      value={productPricingForm.name}
+                      onChange={(e) => setProductPricingForm({ ...productPricingForm, name: e.target.value })}
+                      className="w-full p-2.5 bg-white border border-slate-300 rounded-xl min-h-[44px] text-sm font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">Product ID (Numbers Only) *</label>
+                    <div className="flex items-center rounded-xl border border-slate-300 bg-white overflow-hidden focus-within:ring-2 focus-within:ring-emerald-500 focus-within:border-emerald-500 min-h-[44px]">
+                      <span className="bg-slate-100 text-slate-700 font-black text-xs px-3 py-2.5 border-r border-slate-200 select-none shrink-0">
+                        SP-
+                      </span>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        required
+                        placeholder="e.g. 999"
+                        value={extractProductCodeDigits(productPricingForm.code)}
+                        onChange={(e) => setProductPricingForm({ ...productPricingForm, code: e.target.value.replace(/\D/g, '') })}
+                        className="w-full p-2.5 bg-transparent font-mono font-bold text-slate-900 text-sm focus:outline-none"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Category & Unit */}
                 <div className="grid grid-cols-2 gap-2.5">
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">Category:</label>
+                    <select
+                      value={productPricingForm.category}
+                      onChange={(e) => setProductPricingForm({ ...productPricingForm, category: e.target.value })}
+                      className="w-full p-2.5 bg-white border border-slate-300 rounded-xl min-h-[44px] text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    >
+                      {productCategoryOptions.map(c => (
+                        <option key={c} value={c}>{c}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">Unit:</label>
+                    <select
+                      value={productPricingForm.unit}
+                      onChange={(e) => setProductPricingForm({ ...productPricingForm, unit: e.target.value })}
+                      className="w-full p-2.5 bg-white border border-slate-300 rounded-xl min-h-[44px] text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    >
+                      {['Piece', 'Set', 'Pair', 'Box', 'Carton', 'Kg', 'Liter', 'Meter', 'Roll', 'Packet'].map(u => (
+                        <option key={u} value={u}>{u}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Quantity in Current Location & Selling Price */}
+                <div className="grid grid-cols-2 gap-2.5">
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="font-bold text-slate-700">
+                        Quantity ({activeLocation.name || 'Store'}):
+                      </label>
+                      <span className="text-[10px] text-slate-400 font-normal">
+                        was {productPricingForm.initialQuantity ?? 0}
+                      </span>
+                    </div>
+                    <input
+                      type="number"
+                      min="0"
+                      required
+                      value={productPricingForm.quantity}
+                      onChange={(e) => setProductPricingForm({ ...productPricingForm, quantity: e.target.value })}
+                      className="w-full p-2.5 bg-emerald-50/50 border border-emerald-300 rounded-xl min-h-[44px] text-sm font-black text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                  </div>
                   <div>
                     <label className="block font-bold text-slate-700 mb-1">Selling Price (ETB):</label>
                     <input
@@ -2724,88 +3036,82 @@ export function InventoryPage() {
                       className="w-full p-2.5 bg-white border border-slate-300 rounded-xl min-h-[44px] text-sm font-black text-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                     />
                   </div>
+                </div>
+
+                {/* Low Stock Alert (and Cost Price for Owner) */}
+                <div className={`grid ${isOwner ? 'grid-cols-2' : 'grid-cols-1'} gap-2.5`}>
                   <div>
-                    <label className="block font-bold text-slate-700 mb-1">Cost Price (ETB):</label>
+                    <label className="block font-bold text-slate-700 mb-1">Low Stock Alert (Units):</label>
                     <input
                       type="number"
-                      step="0.01"
-                      min="0"
+                      min="1"
                       required
-                      value={productPricingForm.costPrice}
-                      onChange={(e) => setProductPricingForm({ ...productPricingForm, costPrice: e.target.value })}
+                      value={productPricingForm.minStockThreshold}
+                      onChange={(e) => setProductPricingForm({ ...productPricingForm, minStockThreshold: e.target.value })}
                       className="w-full p-2.5 bg-white border border-slate-300 rounded-xl min-h-[44px] text-sm font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                     />
                   </div>
+                  {isOwner && (
+                    <div>
+                      <label className="block font-bold text-slate-700 mb-1">Cost Price (ETB):</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        required
+                        value={productPricingForm.costPrice}
+                        onChange={(e) => setProductPricingForm({ ...productPricingForm, costPrice: e.target.value })}
+                        className="w-full p-2.5 bg-white border border-slate-300 rounded-xl min-h-[44px] text-sm font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      />
+                    </div>
+                  )}
                 </div>
 
-                {/* Live Profit Margin & Commission Preview Card */}
-                <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/90 space-y-1.5">
-                  <div className="flex items-center justify-between text-[11px]">
-                    <span className="text-slate-500 font-medium">Gross Profit per Unit:</span>
-                    <span className={`font-bold ${grossProfitPerUnit >= 0 ? 'text-emerald-700' : 'text-rose-600'}`}>
-                      {formatCurrency(grossProfitPerUnit)} ({profitMarginPercent}%)
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between text-[11px]">
-                    <span className="text-slate-500 font-medium">Salesperson Commission:</span>
-                    <span className="font-bold text-purple-700">
-                      +{formatCurrency(commissionPerUnit)} / sale ({commissionRateNum}%)
-                    </span>
-                  </div>
-                </div>
+                {isOwner && (
+                  <>
+                 
 
-                {/* Commission Rate & Quick Preset Chips */}
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="font-bold text-slate-700">Commission Rate (%):</label>
-                    <span className="text-[10px] text-slate-400">Quick presets:</span>
-                  </div>
-                  <div className="flex items-center gap-1.5 mb-2">
-                    {[2, 5, 7.5, 10, 15].map(rate => (
-                      <button
-                        key={rate}
-                        type="button"
-                        onClick={() => setProductPricingForm({ ...productPricingForm, defaultCommissionRate: rate })}
-                        className={`flex-1 py-1 rounded-lg text-xs font-bold border transition-colors touch-manipulation ${
-                          commissionRateNum === rate
-                            ? 'bg-purple-700 text-white border-purple-700 shadow-2xs'
-                            : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
-                        }`}
-                      >
-                        {rate}%
-                      </button>
-                    ))}
-                  </div>
-                  <input
-                    type="number"
-                    step="0.5"
-                    min="0"
-                    max="100"
-                    required
-                    value={productPricingForm.defaultCommissionRate}
-                    onChange={(e) => setProductPricingForm({ ...productPricingForm, defaultCommissionRate: e.target.value })}
-                    className="w-full p-2.5 bg-white border border-slate-300 rounded-xl min-h-[44px] text-sm font-bold text-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500"
-                  />
-                </div>
-
-                {/* Min Stock Alert Threshold */}
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">Low Stock Alert Threshold (Units):</label>
-                  <input
-                    type="number"
-                    min="1"
-                    required
-                    value={productPricingForm.minStockThreshold}
-                    onChange={(e) => setProductPricingForm({ ...productPricingForm, minStockThreshold: e.target.value })}
-                    className="w-full p-2.5 bg-white border border-slate-300 rounded-xl min-h-[44px] text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                  />
-                </div>
+                    {/* Commission Rate & Quick Preset Chips */}
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="font-bold text-slate-700">Commission Rate (%):</label>
+                        <span className="text-[10px] text-slate-400">Quick presets:</span>
+                      </div>
+                      <div className="flex items-center gap-1.5 mb-2">
+                        {[2, 5, 7.5, 10, 15].map(rate => (
+                          <button
+                            key={rate}
+                            type="button"
+                            onClick={() => setProductPricingForm({ ...productPricingForm, defaultCommissionRate: rate })}
+                            className={`flex-1 py-1 rounded-lg text-xs font-bold border transition-colors touch-manipulation ${
+                              commissionRateNum === rate
+                                ? 'bg-purple-700 text-white border-purple-700 shadow-2xs'
+                                : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                            }`}
+                          >
+                            {rate}%
+                          </button>
+                        ))}
+                      </div>
+                      <input
+                        type="number"
+                        step="0.5"
+                        min="0"
+                        max="100"
+                        required
+                        value={productPricingForm.defaultCommissionRate}
+                        onChange={(e) => setProductPricingForm({ ...productPricingForm, defaultCommissionRate: e.target.value })}
+                        className="w-full p-2.5 bg-white border border-slate-300 rounded-xl min-h-[44px] text-sm font-bold text-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      />
+                    </div>
+                  </>
+                )}
 
                 {/* Toast Notification */}
                 {pricingSavedToast && (
                   <div className="p-2.5 bg-emerald-50 border border-emerald-300 text-emerald-900 rounded-xl flex items-center gap-2 animate-in fade-in">
                     <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                    <span className="font-bold text-xs">Pricing & commission updated successfully!</span>
+                    <span className="font-bold text-xs">Item & quantity updated successfully!</span>
                   </div>
                 )}
 
@@ -2830,8 +3136,11 @@ export function InventoryPage() {
                   </Button>
                 </div>
               </form>
+            ) : (
+              <div className="p-6 text-center text-slate-400">
+                No product selected.
+              </div>
             )}
-
           </div>
         </Modal>
       )}
@@ -2848,47 +3157,69 @@ export function InventoryPage() {
           <form onSubmit={handleWarehouseAddProductSubmit} className="space-y-4 text-xs">
             <div className="p-3 bg-purple-50 text-purple-900 rounded-xl border border-purple-200">
               <p className="font-bold">
-                {isOwner ? 'Direct Warehouse Product Addition' : 'Warehouse Stock Addition (Pending Owner Approval)'}
+                {canDirectlyManageStock ? 'Direct Warehouse Product Addition' : 'Warehouse Stock Addition (Pending Owner Approval)'}
               </p>
               <p className="text-[11px] text-purple-700 mt-0.5">
-                {isOwner
+                {canDirectlyManageStock
                   ? <>Creates this product and immediately places initial stock directly into <strong>{activeLocation?.name}</strong>.</>
-                  : <>Submits this item to the Owner via Telegram for verification. Once approved, the stock will be added directly into <strong>{activeLocation?.name}</strong> inventory without recording sales.</>}
+                  : <>Submits this item to the Owner for verification. Once approved, the stock will be added directly into <strong>{activeLocation?.name}</strong> inventory without recording sales.</>}
               </p>
             </div>
 
-            <div>
-              <label className="block font-bold text-slate-700 mb-1">Product Name *</label>
-              <input
-                type="text"
-                required
-                list="warehouse-product-suggestions"
-                placeholder="Type or pick product name..."
-                value={warehouseAddProductForm.name}
-                onChange={(e) => {
-                  const val = e.target.value
-                  const match = products.find(p => p.name.toLowerCase() === val.toLowerCase())
-                  if (match) {
-                    setWarehouseAddProductForm(prev => ({
-                      ...prev,
-                      name: val,
-                      category: match.category || prev.category,
-                      unit: match.unit || prev.unit,
-                      sellingPrice: match.sellingPrice ? String(match.sellingPrice) : prev.sellingPrice,
-                      costPrice: match.costPrice ? String(match.costPrice) : prev.costPrice,
-                      minStockThreshold: match.minStockThreshold ? String(match.minStockThreshold) : prev.minStockThreshold,
-                    }))
-                  } else {
-                    setWarehouseAddProductForm(prev => ({ ...prev, name: val }))
-                  }
-                }}
-                className="w-full p-2.5 bg-white border border-slate-300 rounded-xl font-bold text-slate-900 text-sm min-h-[44px]"
-              />
-              <datalist id="warehouse-product-suggestions">
-                {products.map(p => (
-                  <option key={p.id} value={p.name} />
-                ))}
-              </datalist>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="sm:col-span-2">
+                <label className="block font-bold text-slate-700 mb-1">Product Name *</label>
+                <input
+                  type="text"
+                  required
+                  list="warehouse-product-suggestions"
+                  placeholder="Type or pick product name..."
+                  value={warehouseAddProductForm.name}
+                  onChange={(e) => {
+                    const val = e.target.value
+                    const match = products.find(p => p.name.toLowerCase() === val.toLowerCase())
+                    if (match) {
+                      setWarehouseAddProductForm(prev => ({
+                        ...prev,
+                        name: val,
+                        code: match.code || prev.code,
+                        category: match.category || prev.category,
+                        unit: match.unit || prev.unit,
+                        sellingPrice: match.sellingPrice ? String(match.sellingPrice) : prev.sellingPrice,
+                        costPrice: match.costPrice ? String(match.costPrice) : prev.costPrice,
+                        minStockThreshold: match.minStockThreshold ? String(match.minStockThreshold) : prev.minStockThreshold,
+                      }))
+                    } else {
+                      setWarehouseAddProductForm(prev => ({ ...prev, name: val }))
+                    }
+                  }}
+                  className="w-full p-2.5 bg-white border border-slate-300 rounded-xl font-bold text-slate-900 text-sm min-h-[44px]"
+                />
+                <datalist id="warehouse-product-suggestions">
+                  {products.map(p => (
+                    <option key={p.id} value={p.name} />
+                  ))}
+                </datalist>
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Product ID (Numbers Only) *</label>
+                <div className="flex items-center rounded-xl border border-slate-300 bg-white overflow-hidden focus-within:ring-2 focus-within:ring-emerald-500 focus-within:border-emerald-500 min-h-[44px]">
+                  <span className="bg-slate-100 text-slate-700 font-black text-xs px-3 py-2.5 border-r border-slate-200 select-none shrink-0">
+                    SP-
+                  </span>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    required
+                    placeholder="e.g. 999"
+                    value={extractProductCodeDigits(warehouseAddProductForm.code)}
+                    onChange={(e) => setWarehouseAddProductForm({ ...warehouseAddProductForm, code: e.target.value.replace(/\D/g, '') })}
+                    className="w-full p-2.5 bg-transparent font-mono font-bold text-slate-900 text-sm focus:outline-none"
+                  />
+                </div>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -2987,7 +3318,7 @@ export function InventoryPage() {
               >
                 {isSubmittingWarehouseAddProduct
                   ? 'Submitting...'
-                  : isOwner
+                  : canDirectlyManageStock
                   ? 'Add Product to Warehouse'
                   : 'Submit for Owner Approval'}
               </Button>
@@ -3059,16 +3390,36 @@ export function InventoryPage() {
                   <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
                   <span>New Product Details</span>
                 </p>
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-0.5">Product Name *</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g. Merkato Cotton T-Shirts"
-                    value={warehouseDirectPurchaseForm.newProductName}
-                    onChange={(e) => setWarehouseDirectPurchaseForm(prev => ({ ...prev, newProductName: e.target.value }))}
-                    className="w-full p-2 bg-white border border-slate-300 rounded-lg font-bold text-xs"
-                  />
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <div className="sm:col-span-2">
+                    <label className="block font-semibold text-slate-700 mb-0.5">Product Name *</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. Merkato Cotton T-Shirts"
+                      value={warehouseDirectPurchaseForm.newProductName}
+                      onChange={(e) => setWarehouseDirectPurchaseForm(prev => ({ ...prev, newProductName: e.target.value }))}
+                      className="w-full p-2 bg-white border border-slate-300 rounded-lg font-bold text-xs"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-0.5">Product ID (Numbers Only) *</label>
+                    <div className="flex items-center rounded-lg border border-slate-300 bg-white overflow-hidden focus-within:ring-2 focus-within:ring-emerald-500 focus-within:border-emerald-500">
+                      <span className="bg-slate-100 text-slate-700 font-black text-[11px] px-2 py-1.5 border-r border-slate-200 select-none shrink-0">
+                        SP-
+                      </span>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        required
+                        placeholder="e.g. 999"
+                        value={extractProductCodeDigits(warehouseDirectPurchaseForm.newProductCode)}
+                        onChange={(e) => setWarehouseDirectPurchaseForm(prev => ({ ...prev, newProductCode: e.target.value.replace(/\D/g, '') }))}
+                        className="w-full p-1.5 bg-transparent font-mono font-bold text-xs focus:outline-none"
+                      />
+                    </div>
+                  </div>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <div>
@@ -3263,9 +3614,9 @@ export function InventoryPage() {
               >
                 {isSubmittingWarehousePurchase
                   ? 'Submitting...'
-                  : (!isOwner || requireTelegramApproval
-                    ? 'Send for Telegram Approval'
-                    : 'Record Direct Purchase')}
+                  : canDirectlyManageStock
+                  ? 'Record Direct Purchase'
+                  : 'Send for Approval'}
               </Button>
             </div>
           </form>
@@ -3396,47 +3747,69 @@ export function InventoryPage() {
           <form onSubmit={handleStoreAddProductSubmit} className="space-y-4 text-xs">
             <div className="p-3 bg-emerald-50 text-emerald-900 rounded-xl border border-emerald-200">
               <p className="font-bold">
-                {isOwner ? 'Direct Store Product Addition' : 'Store Stock Addition (Pending Owner Approval)'}
+                {canDirectlyManageStock ? 'Direct Store Product Addition' : 'Store Stock Addition (Pending Owner Approval)'}
               </p>
               <p className="text-[11px] text-emerald-700 mt-0.5">
-                {isOwner
+                {canDirectlyManageStock
                   ? <>Creates this product and immediately places initial stock directly into <strong>{activeLocation?.name}</strong>.</>
-                  : <>Submits this item to the Owner via Telegram for verification. Once approved, the stock will be added directly into <strong>{activeLocation?.name}</strong> inventory without recording sales.</>}
+                  : <>Submits this item to the Owner for verification. Once approved, the stock will be added directly into <strong>{activeLocation?.name}</strong> inventory without recording sales.</>}
               </p>
             </div>
 
-            <div>
-              <label className="block font-bold text-slate-700 mb-1">Product Name *</label>
-              <input
-                type="text"
-                required
-                list="store-product-suggestions"
-                placeholder="Type or pick product name..."
-                value={storeAddProductForm.name}
-                onChange={(e) => {
-                  const val = e.target.value
-                  const match = products.find(p => p.name.toLowerCase() === val.toLowerCase())
-                  if (match) {
-                    setStoreAddProductForm(prev => ({
-                      ...prev,
-                      name: val,
-                      category: match.category || prev.category,
-                      unit: match.unit || prev.unit,
-                      sellingPrice: match.sellingPrice ? String(match.sellingPrice) : prev.sellingPrice,
-                      costPrice: match.costPrice ? String(match.costPrice) : prev.costPrice,
-                      minStockThreshold: match.minStockThreshold ? String(match.minStockThreshold) : prev.minStockThreshold,
-                    }))
-                  } else {
-                    setStoreAddProductForm(prev => ({ ...prev, name: val }))
-                  }
-                }}
-                className="w-full p-2.5 bg-white border border-slate-300 rounded-xl font-bold text-slate-900 text-sm min-h-[44px]"
-              />
-              <datalist id="store-product-suggestions">
-                {products.map(p => (
-                  <option key={p.id} value={p.name} />
-                ))}
-              </datalist>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="sm:col-span-2">
+                <label className="block font-bold text-slate-700 mb-1">Product Name *</label>
+                <input
+                  type="text"
+                  required
+                  list="store-product-suggestions"
+                  placeholder="Type or pick product name..."
+                  value={storeAddProductForm.name}
+                  onChange={(e) => {
+                    const val = e.target.value
+                    const match = products.find(p => p.name.toLowerCase() === val.toLowerCase())
+                    if (match) {
+                      setStoreAddProductForm(prev => ({
+                        ...prev,
+                        name: val,
+                        code: match.code || prev.code,
+                        category: match.category || prev.category,
+                        unit: match.unit || prev.unit,
+                        sellingPrice: match.sellingPrice ? String(match.sellingPrice) : prev.sellingPrice,
+                        costPrice: match.costPrice ? String(match.costPrice) : prev.costPrice,
+                        minStockThreshold: match.minStockThreshold ? String(match.minStockThreshold) : prev.minStockThreshold,
+                      }))
+                    } else {
+                      setStoreAddProductForm(prev => ({ ...prev, name: val }))
+                    }
+                  }}
+                  className="w-full p-2.5 bg-white border border-slate-300 rounded-xl font-bold text-slate-900 text-sm min-h-[44px]"
+                />
+                <datalist id="store-product-suggestions">
+                  {products.map(p => (
+                    <option key={p.id} value={p.name} />
+                  ))}
+                </datalist>
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Product ID (Numbers Only) *</label>
+                <div className="flex items-center rounded-xl border border-slate-300 bg-white overflow-hidden focus-within:ring-2 focus-within:ring-emerald-500 focus-within:border-emerald-500 min-h-[44px]">
+                  <span className="bg-slate-100 text-slate-700 font-black text-xs px-3 py-2.5 border-r border-slate-200 select-none shrink-0">
+                    SP-
+                  </span>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    required
+                    placeholder="e.g. 999"
+                    value={extractProductCodeDigits(storeAddProductForm.code)}
+                    onChange={(e) => setStoreAddProductForm({ ...storeAddProductForm, code: e.target.value.replace(/\D/g, '') })}
+                    className="w-full p-2.5 bg-transparent font-mono font-bold text-slate-900 text-sm focus:outline-none"
+                  />
+                </div>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -3535,7 +3908,7 @@ export function InventoryPage() {
               >
                 {isSubmittingStoreAddProduct
                   ? 'Submitting...'
-                  : isOwner
+                  : canDirectlyManageStock
                   ? 'Add Product to Store'
                   : 'Submit for Owner Approval'}
               </Button>
@@ -3607,16 +3980,36 @@ export function InventoryPage() {
                   <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
                   <span>New Product Details</span>
                 </p>
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-0.5">Product Name *</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g. Merkato Cotton T-Shirts"
-                    value={storeDirectPurchaseForm.newProductName}
-                    onChange={(e) => setStoreDirectPurchaseForm(prev => ({ ...prev, newProductName: e.target.value }))}
-                    className="w-full p-2 bg-white border border-slate-300 rounded-lg font-bold text-xs"
-                  />
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <div className="sm:col-span-2">
+                    <label className="block font-semibold text-slate-700 mb-0.5">Product Name *</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. Merkato Cotton T-Shirts"
+                      value={storeDirectPurchaseForm.newProductName}
+                      onChange={(e) => setStoreDirectPurchaseForm(prev => ({ ...prev, newProductName: e.target.value }))}
+                      className="w-full p-2 bg-white border border-slate-300 rounded-lg font-bold text-xs"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-0.5">Product ID (Numbers Only) *</label>
+                    <div className="flex items-center rounded-lg border border-slate-300 bg-white overflow-hidden focus-within:ring-2 focus-within:ring-emerald-500 focus-within:border-emerald-500">
+                      <span className="bg-slate-100 text-slate-700 font-black text-[11px] px-2 py-1.5 border-r border-slate-200 select-none shrink-0">
+                        SP-
+                      </span>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        required
+                        placeholder="e.g. 999"
+                        value={extractProductCodeDigits(storeDirectPurchaseForm.newProductCode)}
+                        onChange={(e) => setStoreDirectPurchaseForm(prev => ({ ...prev, newProductCode: e.target.value.replace(/\D/g, '') }))}
+                        className="w-full p-1.5 bg-transparent font-mono font-bold text-xs focus:outline-none"
+                      />
+                    </div>
+                  </div>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <div>
@@ -3811,9 +4204,507 @@ export function InventoryPage() {
               >
                 {isSubmittingStorePurchase
                   ? 'Submitting...'
-                  : (!isOwner || requireTelegramApproval
-                    ? 'Request Approval'
-                    : 'Record Direct Purchase')}
+                  : canDirectlyManageStock
+                  ? 'Record Direct Purchase'
+                  : 'Send for Approval'}
+              </Button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {/* ───────────────────────────────────────────────────────────── */}
+      {/* 5B. MODAL: RESTOCK — NEW ITEM                                 */}
+      {/* ───────────────────────────────────────────────────────────── */}
+      {isRestockNewOpen && (
+        <Modal
+          isOpen={isRestockNewOpen}
+          onClose={() => setIsRestockNewOpen(false)}
+          title={`Restock — New Item (${activeLocation?.name || 'Store'})`}
+        >
+          <form onSubmit={handleRestockNewSubmit} className="space-y-4">
+            <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 text-xs text-slate-600 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-slate-800">Target Location:</span>
+                <span className="px-2 py-0.5 rounded-md bg-white border border-slate-200 font-bold text-slate-900">
+                  {activeLocation?.name}
+                </span>
+              </div>
+              <span className="text-[11px] text-slate-400 font-medium">
+                Min Alert: 3 units (default)
+              </span>
+            </div>
+
+            {/* Product Name */}
+            <div>
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                Product Name *
+              </label>
+              <input
+                type="text"
+                required
+                autoFocus
+                placeholder="e.g. Total Quartz 9000 5W-40"
+                value={restockNewForm.name}
+                onChange={(e) => setRestockNewForm(prev => ({ ...prev, name: e.target.value }))}
+                className="w-full p-2.5 bg-white border border-slate-300 rounded-xl font-bold text-slate-900 text-sm min-h-[44px] focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+              />
+            </div>
+
+            {/* Category (SELECT) and Unit (SELECT) */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  Category *
+                </label>
+                <CategorySearchSelector
+                  categories={productCategoryOptions}
+                  value={restockNewForm.category}
+                  onChange={(val) => setRestockNewForm(prev => ({ ...prev, category: val }))}
+                  placeholder="Search or pick category..."
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  Unit *
+                </label>
+                <select
+                  required
+                  value={restockNewForm.unit}
+                  onChange={(e) => setRestockNewForm(prev => ({ ...prev, unit: e.target.value }))}
+                  className="w-full p-2.5 bg-white border border-slate-300 rounded-xl font-bold text-slate-900 text-sm min-h-[44px] focus:outline-none focus:ring-2 focus:ring-emerald-500/20 cursor-pointer"
+                >
+                  {INVENTORY_UNITS.map(u => (
+                    <option key={u} value={u}>{u}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Quantity */}
+            <div>
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                Quantity *
+              </label>
+              <div className="relative">
+                <input
+                  type="number"
+                  min="0.01"
+                  step="any"
+                  required
+                  placeholder="e.g. 10"
+                  value={restockNewForm.quantity}
+                  onChange={(e) => setRestockNewForm(prev => ({ ...prev, quantity: e.target.value }))}
+                  className="w-full p-2.5 bg-white border border-slate-300 rounded-xl font-bold text-slate-900 text-sm min-h-[44px] focus:outline-none focus:ring-2 focus:ring-emerald-500/20 pr-16"
+                />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400 uppercase">
+                  {restockNewForm.unit}
+                </span>
+              </div>
+            </div>
+
+            {/* Retail Selling Price & Min Alert */}
+            <div className="p-3 bg-slate-50/80 rounded-xl border border-slate-200 space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
+                  Retail Selling Price *
+                </label>
+                <span className="text-[11px] font-semibold text-slate-500">
+                  Min Alert: <b className="text-slate-800">3 units</b> (default)
+                </span>
+              </div>
+
+              <div className="relative">
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  required
+                  placeholder="e.g. 650"
+                  value={restockNewForm.sellingPrice}
+                  onChange={(e) => setRestockNewForm(prev => ({ ...prev, sellingPrice: e.target.value }))}
+                  className="w-full p-2.5 bg-white border border-slate-300 rounded-xl font-bold text-slate-900 text-sm min-h-[44px] focus:outline-none focus:ring-2 focus:ring-emerald-500/20 pr-12"
+                />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">
+                  ETB
+                </span>
+              </div>
+            </div>
+
+            {/* Purchase / Payment Method Section */}
+            <div className="space-y-2.5 pt-2 border-t border-slate-200">
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
+                Purchase / Payment Method *
+              </label>
+
+              <div className="grid grid-cols-3 gap-2">
+                {[
+                  { id: 'Banking', label: 'Banking', icon: Building2 },
+                  { id: 'Telebirr', label: 'Telebirr', icon: Smartphone },
+                  { id: 'Cash', label: 'Cash', icon: Banknote },
+                ].map(method => {
+                  const Icon = method.icon
+                  const isSelected = restockNewForm.paymentMethod === method.id
+                  return (
+                    <button
+                      key={method.id}
+                      type="button"
+                      onClick={() => setRestockNewForm(prev => ({ ...prev, paymentMethod: method.id }))}
+                      className={`p-2.5 rounded-xl border text-xs font-bold flex flex-col items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                        isSelected
+                          ? 'border-emerald-600 bg-emerald-50 text-emerald-900 shadow-2xs'
+                          : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                      }`}
+                    >
+                      <Icon className={`w-4 h-4 ${isSelected ? 'text-emerald-700' : 'text-slate-400'}`} />
+                      <span>{method.label}</span>
+                    </button>
+                  )
+                })}
+              </div>
+
+              {/* Sub-options for Banking */}
+              {restockNewForm.paymentMethod === 'Banking' && (
+                <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-2.5 animate-in fade-in duration-100">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 uppercase mb-1">
+                      Ethiopian Bank *
+                    </label>
+                    <select
+                      value={restockNewForm.bankProvider}
+                      onChange={(e) => setRestockNewForm(prev => ({ ...prev, bankProvider: e.target.value }))}
+                      className="w-full p-2 bg-white border border-slate-300 rounded-lg text-xs font-bold text-slate-800"
+                    >
+                      {ETHIOPIAN_PAYMENT_PROVIDERS.filter(p => p.id !== 'telebirr').map(p => (
+                        <option key={p.id} value={p.id}>{p.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 uppercase mb-1">
+                      Bank Reference / Transaction # (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. CBE-TX-99812"
+                      value={restockNewForm.bankReference}
+                      onChange={(e) => setRestockNewForm(prev => ({ ...prev, bankReference: e.target.value }))}
+                      className="w-full p-2 bg-white border border-slate-300 rounded-lg text-xs font-semibold text-slate-900 placeholder:font-normal"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Sub-options for Telebirr */}
+              {restockNewForm.paymentMethod === 'Telebirr' && (
+                <div className="p-3 bg-emerald-50/50 rounded-xl border border-emerald-200 space-y-2 animate-in fade-in duration-100">
+                  <div className="flex items-center gap-2 text-xs font-bold text-emerald-900">
+                    <Smartphone className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Telebirr Digital Payment</span>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 uppercase mb-1">
+                      Telebirr Reference / Transaction # (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. TB123456789"
+                      value={restockNewForm.telebirrReference}
+                      onChange={(e) => setRestockNewForm(prev => ({ ...prev, telebirrReference: e.target.value }))}
+                      className="w-full p-2 bg-white border border-emerald-300 rounded-lg text-xs font-semibold text-slate-900 placeholder:font-normal"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Cash note */}
+              {restockNewForm.paymentMethod === 'Cash' && (
+                <div className="p-3 bg-amber-50/60 rounded-xl border border-amber-200 text-xs text-amber-900 flex items-center gap-2">
+                  <Banknote className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>Physical cash payment on stock intake.</span>
+                </div>
+              )}
+            </div>
+
+            {/* Notification Info Banner */}
+            <div className="p-3 rounded-xl bg-blue-50 border border-blue-200 text-blue-900 text-xs flex items-start gap-2.5">
+              <Send className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-bold">Review & Approval</p>
+                <p className="text-[11px] text-blue-700 mt-0.5">
+                  An instant notification with the item details, quantity, and prices is sent to the Owner for verification and approval.
+                </p>
+              </div>
+            </div>
+
+            {/* Modal Actions */}
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-200">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setIsRestockNewOpen(false)}
+                disabled={isSubmittingRestock}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                variant="primary"
+                disabled={isSubmittingRestock}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold"
+              >
+                {isSubmittingRestock ? (
+                  <span className="flex items-center gap-1.5">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Sending Request...
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1.5">
+                    <ArrowDownToLine className="w-4 h-4" />
+                    Restock Item
+                  </span>
+                )}
+              </Button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {/* ───────────────────────────────────────────────────────────── */}
+      {/* 5C. MODAL: RESTOCK — EXISTING ITEM                            */}
+      {/* ───────────────────────────────────────────────────────────── */}
+      {isRestockExistingOpen && (
+        <Modal
+          isOpen={isRestockExistingOpen}
+          onClose={() => setIsRestockExistingOpen(false)}
+          title={`Restock — Existing Item (${activeLocation?.name || 'Store'})`}
+        >
+          <form onSubmit={handleRestockExistingSubmit} className="space-y-4">
+            <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 text-xs text-slate-600 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-slate-800">Target Location:</span>
+                <span className="px-2 py-0.5 rounded-md bg-white border border-slate-200 font-bold text-slate-900">
+                  {activeLocation?.name}
+                </span>
+              </div>
+              <span className="text-[11px] text-slate-400 font-medium">
+                Min Alert: 3 units (default)
+              </span>
+            </div>
+
+            {/* Searchable Product Selector */}
+            <div>
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                Select Existing Product *
+              </label>
+              <SearchableProductSelect
+                products={products}
+                value={restockExistingForm.productId}
+                onChange={(id, prod) => {
+                  const productObj = prod || products.find(p => p.id === id)
+                  setRestockExistingForm(prev => ({
+                    ...prev,
+                    productId: id,
+                    sellingPrice: productObj?.sellingPrice ? String(productObj.sellingPrice) : '',
+                  }))
+                }}
+                warehouseStock={activeLocation?.stock || {}}
+                stockLabel="in stock"
+                showCost={false}
+                placeholder="Search catalog by name, category, or code..."
+              />
+            </div>
+
+            {/* Quantity */}
+            <div>
+              {(() => {
+                const prod = products.find(p => p.id === restockExistingForm.productId)
+                const unit = prod?.unit || 'Piece'
+                const currStock = (activeLocation?.stock?.[prod?.id] || 0)
+                return (
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
+                        Restock Quantity *
+                      </label>
+                      {prod && (
+                        <span className="text-[11px] text-slate-500 font-semibold">
+                          Current Stock: <b className="text-slate-800">{currStock} {unit}</b>
+                        </span>
+                      )}
+                    </div>
+                    <div className="relative">
+                      <input
+                        type="number"
+                        min="0.01"
+                        step="any"
+                        required
+                        placeholder="e.g. 25"
+                        value={restockExistingForm.quantity}
+                        onChange={(e) => setRestockExistingForm(prev => ({ ...prev, quantity: e.target.value }))}
+                        className="w-full p-2.5 bg-white border border-slate-300 rounded-xl font-bold text-slate-900 text-sm min-h-[44px] focus:outline-none focus:ring-2 focus:ring-emerald-500/20 pr-16"
+                      />
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400 uppercase">
+                        {unit}
+                      </span>
+                    </div>
+                  </div>
+                )
+              })()}
+            </div>
+
+            {/* Retail Selling Price & Min Alert */}
+            <div className="p-3 bg-slate-50/80 rounded-xl border border-slate-200 space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
+                  Retail Selling Price *
+                </label>
+                <span className="text-[11px] font-semibold text-slate-500">
+                  Min Alert: <b className="text-slate-800">3 units</b> (default)
+                </span>
+              </div>
+
+              <div className="relative">
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  required
+                  placeholder="e.g. 650"
+                  value={restockExistingForm.sellingPrice}
+                  onChange={(e) => setRestockExistingForm(prev => ({ ...prev, sellingPrice: e.target.value }))}
+                  className="w-full p-2.5 bg-white border border-slate-300 rounded-xl font-bold text-slate-900 text-sm min-h-[44px] focus:outline-none focus:ring-2 focus:ring-emerald-500/20 pr-12"
+                />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">
+                  ETB
+                </span>
+              </div>
+            </div>
+
+            {/* Purchase Method Section */}
+            <div className="space-y-2.5 pt-2 border-t border-slate-200">
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
+                Purchase / Payment Method *
+              </label>
+
+              <div className="grid grid-cols-3 gap-2">
+                {[
+                  { id: 'Banking', label: 'Banking', icon: Building2 },
+                  { id: 'Telebirr', label: 'Telebirr', icon: Smartphone },
+                  { id: 'Cash', label: 'Cash', icon: Banknote },
+                ].map(method => {
+                  const Icon = method.icon
+                  const isSelected = restockExistingForm.paymentMethod === method.id
+                  return (
+                    <button
+                      key={method.id}
+                      type="button"
+                      onClick={() => setRestockExistingForm(prev => ({ ...prev, paymentMethod: method.id }))}
+                      className={`p-2.5 rounded-xl border text-xs font-bold flex flex-col items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                        isSelected
+                          ? 'border-emerald-600 bg-emerald-50 text-emerald-900 shadow-2xs'
+                          : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                      }`}
+                    >
+                      <Icon className={`w-4 h-4 ${isSelected ? 'text-emerald-700' : 'text-slate-400'}`} />
+                      <span>{method.label}</span>
+                    </button>
+                  )
+                })}
+              </div>
+
+              {/* Sub-options for Banking */}
+              {restockExistingForm.paymentMethod === 'Banking' && (
+                <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-2.5 animate-in fade-in duration-100">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 uppercase mb-1">
+                      Ethiopian Bank *
+                    </label>
+                    <select
+                      value={restockExistingForm.bankProvider}
+                      onChange={(e) => setRestockExistingForm(prev => ({ ...prev, bankProvider: e.target.value }))}
+                      className="w-full p-2 bg-white border border-slate-300 rounded-lg text-xs font-bold text-slate-800"
+                    >
+                      {ETHIOPIAN_PAYMENT_PROVIDERS.filter(p => p.id !== 'telebirr').map(p => (
+                        <option key={p.id} value={p.id}>{p.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 uppercase mb-1">
+                      Bank Reference / Transaction # (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. CBE-TX-99812"
+                      value={restockExistingForm.bankReference}
+                      onChange={(e) => setRestockExistingForm(prev => ({ ...prev, bankReference: e.target.value }))}
+                      className="w-full p-2 bg-white border border-slate-300 rounded-lg text-xs font-semibold text-slate-900 placeholder:font-normal"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Sub-options for Telebirr */}
+              {restockExistingForm.paymentMethod === 'Telebirr' && (
+                <div className="p-3 bg-emerald-50/50 rounded-xl border border-emerald-200 space-y-2 animate-in fade-in duration-100">
+                  <div className="flex items-center gap-2 text-xs font-bold text-emerald-900">
+                    <Smartphone className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Telebirr Digital Payment</span>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 uppercase mb-1">
+                      Telebirr Reference / Transaction # (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. TB123456789"
+                      value={restockExistingForm.telebirrReference}
+                      onChange={(e) => setRestockExistingForm(prev => ({ ...prev, telebirrReference: e.target.value }))}
+                      className="w-full p-2 bg-white border border-emerald-300 rounded-lg text-xs font-semibold text-slate-900 placeholder:font-normal"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Cash note */}
+              {restockExistingForm.paymentMethod === 'Cash' && (
+                <div className="p-3 bg-amber-50/60 rounded-xl border border-amber-200 text-xs text-amber-900 flex items-center gap-2">
+                  <Banknote className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>Physical cash payment on stock intake.</span>
+                </div>
+              )}
+            </div>
+
+
+            {/* Modal Actions */}
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-200">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setIsRestockExistingOpen(false)}
+                disabled={isSubmittingRestock}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                variant="primary"
+                disabled={isSubmittingRestock || !restockExistingForm.productId}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold"
+              >
+                {isSubmittingRestock ? (
+                  <span className="flex items-center gap-1.5">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Sending Request...
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1.5">
+                    <ArrowDownToLine className="w-4 h-4" />
+                    Restock Item
+                  </span>
+                )}
               </Button>
             </div>
           </form>
@@ -4248,16 +5139,36 @@ export function InventoryPage() {
 
                         {item.isNewProduct ? (
                           <div className="space-y-1.5 p-2 bg-emerald-50/50 rounded-lg border border-emerald-100">
-                            <div>
-                              <label className="block text-[10px] font-bold text-emerald-900 mb-0.5">New Product Name *</label>
-                              <input
-                                type="text"
-                                required
-                                placeholder="e.g. Merkato Cotton T-Shirts"
-                                value={item.newProductName || ''}
-                                onChange={(e) => handleUpdateBulkPurchaseRow(item.id, 'newProductName', e.target.value)}
-                                className="w-full p-1.5 bg-white border border-emerald-200 rounded-lg text-xs font-bold"
-                              />
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                              <div className="sm:col-span-2">
+                                <label className="block text-[10px] font-bold text-emerald-900 mb-0.5">New Product Name *</label>
+                                <input
+                                  type="text"
+                                  required
+                                  placeholder="e.g. Merkato Cotton T-Shirts"
+                                  value={item.newProductName || ''}
+                                  onChange={(e) => handleUpdateBulkPurchaseRow(item.id, 'newProductName', e.target.value)}
+                                  className="w-full p-1.5 bg-white border border-emerald-200 rounded-lg text-xs font-bold"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[10px] font-bold text-emerald-900 mb-0.5">Product ID (Numbers Only) *</label>
+                                <div className="flex items-center rounded-lg border border-emerald-200 bg-white overflow-hidden focus-within:ring-2 focus-within:ring-emerald-500">
+                                  <span className="bg-emerald-50 text-emerald-800 font-black text-[10px] px-1.5 py-1.5 border-r border-emerald-200 select-none shrink-0">
+                                    SP-
+                                  </span>
+                                  <input
+                                    type="text"
+                                    inputMode="numeric"
+                                    pattern="[0-9]*"
+                                    required
+                                    placeholder="e.g. 999"
+                                    value={extractProductCodeDigits(item.newProductCode)}
+                                    onChange={(e) => handleUpdateBulkPurchaseRow(item.id, 'newProductCode', e.target.value.replace(/\D/g, ''))}
+                                    className="w-full p-1 bg-transparent text-xs font-mono font-bold focus:outline-none"
+                                  />
+                                </div>
+                              </div>
                             </div>
                             <div className="grid grid-cols-2 gap-2">
                               <div>
@@ -4416,16 +5327,36 @@ export function InventoryPage() {
                   /* New Product Fields for Direct Purchase */
                   <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2.5">
                     <p className="font-bold text-emerald-900 text-xs">New Product Details</p>
-                    <div>
-                      <label className="block font-semibold text-slate-700 mb-0.5">Product Name *</label>
-                      <input
-                        type="text"
-                        required
-                        placeholder="e.g. Merkato Cotton T-Shirts"
-                        value={purchaseForm.newProductName}
-                        onChange={(e) => setPurchaseForm({ ...purchaseForm, newProductName: e.target.value })}
-                        className="w-full p-2 bg-white border border-slate-300 rounded-lg font-bold"
-                      />
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      <div className="sm:col-span-2">
+                        <label className="block font-semibold text-slate-700 mb-0.5">Product Name *</label>
+                        <input
+                          type="text"
+                          required
+                          placeholder="e.g. Merkato Cotton T-Shirts"
+                          value={purchaseForm.newProductName}
+                          onChange={(e) => setPurchaseForm({ ...purchaseForm, newProductName: e.target.value })}
+                          className="w-full p-2 bg-white border border-slate-300 rounded-lg font-bold"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-semibold text-slate-700 mb-0.5">Product ID (Numbers Only) *</label>
+                        <div className="flex items-center rounded-lg border border-slate-300 bg-white overflow-hidden focus-within:ring-2 focus-within:ring-emerald-500 focus-within:border-emerald-500">
+                          <span className="bg-slate-100 text-slate-700 font-black text-[11px] px-2 py-1.5 border-r border-slate-200 select-none shrink-0">
+                            SP-
+                          </span>
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            pattern="[0-9]*"
+                            required
+                            placeholder="e.g. 999"
+                            value={extractProductCodeDigits(purchaseForm.newProductCode)}
+                            onChange={(e) => setPurchaseForm({ ...purchaseForm, newProductCode: e.target.value.replace(/\D/g, '') })}
+                            className="w-full p-1.5 bg-transparent font-mono font-bold text-xs focus:outline-none"
+                          />
+                        </div>
+                      </div>
                     </div>
                     <div className="grid grid-cols-2 gap-2">
                       <div>
@@ -4590,16 +5521,36 @@ export function InventoryPage() {
               </p>
             </div>
 
-            <div>
-              <label className="block font-bold text-slate-700 mb-1">Product Name *</label>
-              <input
-                type="text"
-                required
-                placeholder="e.g. Ethiopian Yirgacheffe Coffee Beans (500g)"
-                value={standaloneProductForm.name}
-                onChange={(e) => setStandaloneProductForm({ ...standaloneProductForm, name: e.target.value })}
-                className="w-full p-2.5 bg-white border border-slate-300 rounded-xl min-h-[44px] font-bold text-sm"
-              />
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+              <div className="sm:col-span-2">
+                <label className="block font-bold text-slate-700 mb-1">Product Name *</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Ethiopian Yirgacheffe Coffee Beans (500g)"
+                  value={standaloneProductForm.name}
+                  onChange={(e) => setStandaloneProductForm({ ...standaloneProductForm, name: e.target.value })}
+                  className="w-full p-2.5 bg-white border border-slate-300 rounded-xl min-h-[44px] font-bold text-sm"
+                />
+              </div>
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Product ID (Numbers Only) *</label>
+                <div className="flex items-center rounded-xl border border-slate-300 bg-white overflow-hidden focus-within:ring-2 focus-within:ring-emerald-500 focus-within:border-emerald-500 min-h-[44px]">
+                  <span className="bg-slate-100 text-slate-700 font-black text-xs px-3 py-2.5 border-r border-slate-200 select-none shrink-0">
+                    SP-
+                  </span>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    required
+                    placeholder="e.g. 999"
+                    value={extractProductCodeDigits(standaloneProductForm.code)}
+                    onChange={(e) => setStandaloneProductForm({ ...standaloneProductForm, code: e.target.value.replace(/\D/g, '') })}
+                    className="w-full p-2.5 bg-transparent font-mono font-bold text-slate-900 text-sm focus:outline-none"
+                  />
+                </div>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
@@ -4939,7 +5890,21 @@ export function InventoryPage() {
                                     {it.unit || 'Piece'}
                                   </Badge>
                                 </div>
-                                <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-200/60">
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1 border-t border-slate-200/60">
+                                  <div>
+                                    <label className="block text-[10px] font-bold uppercase text-slate-500 mb-0.5">
+                                      Purchase Price (ETB)
+                                    </label>
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      step="any"
+                                      value={cfg.costPrice}
+                                      onChange={(e) => handleUpdateApprovalItemConfig(req.id, it, idx, 'costPrice', e.target.value)}
+                                      className="w-full px-2 py-1 bg-white border border-slate-300 rounded-lg text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                                      placeholder="Cost Price"
+                                    />
+                                  </div>
                                   <div>
                                     <label className="block text-[10px] font-bold uppercase text-slate-500 mb-0.5">
                                       Selling Price (ETB) *
@@ -5032,9 +5997,9 @@ export function InventoryPage() {
                                   const cfg = getApprovalItemConfig(req.id, it, idx)
                                   return {
                                     productId: it.productId || `item_${idx}`,
+                                    costPrice: parseFloat(cfg.costPrice) || it.costPerUnit || undefined,
                                     sellingPrice: parseFloat(cfg.sellingPrice) || undefined,
                                     minStockThreshold: parseInt(cfg.minStockThreshold, 10) || undefined,
-                                    costPrice: it.costPerUnit || undefined,
                                     unit: cfg.unit || it.unit || 'Piece',
                                   }
                                 })

@@ -18,8 +18,11 @@ import {
   Eye,
   Store,
   Warehouse,
-  Table as TableIcon,
-  LayoutGrid
+  Coins,
+  History,
+  Wallet,
+  Receipt,
+  Award
 } from 'lucide-react'
 import { useTenant } from '../context/TenantContext'
 import { useAuth } from '../context/AuthContext'
@@ -28,7 +31,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'
 import { Badge } from '../components/ui/Badge'
 import { Modal } from '../components/ui/Modal'
-import { formatCurrency } from '../lib/utils'
+import { formatCurrency, formatProductCode, matchesProductSearch } from '../lib/utils'
 import { ETHIOPIAN_PAYMENT_PROVIDERS, DEFAULT_BANK } from '../lib/ethiopian-banks'
 
 export const getProductCommissionRate = (product) => {
@@ -40,7 +43,7 @@ export const getProductCommissionRate = (product) => {
 }
 
 export function PosPage() {
-  const { stores, warehouses, products, staff, recordSale } = useTenant()
+  const { stores, warehouses, products, staff, recordSale, currentUserCommissionStats } = useTenant()
   const { currentUser, isOwner } = useAuth()
   const { toast } = useToast()
 
@@ -114,22 +117,6 @@ export function PosPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedCategory, setSelectedCategory] = useState('All')
 
-  // Catalog View Mode: 'cards' | 'table' (persisted in localStorage, matches InventoryPage)
-  const [posViewMode, setPosViewMode] = useState(() => {
-    try {
-      return localStorage.getItem('omestock_pos_view_mode') || 'cards'
-    } catch {
-      return 'cards'
-    }
-  })
-
-  const handleSetPosViewMode = (mode) => {
-    setPosViewMode(mode)
-    try {
-      localStorage.setItem('omestock_pos_view_mode', mode)
-    } catch {}
-  }
-
   // Cart: [{ product, quantity, customPrice, commissionAmount }]
   const [cart, setCart] = useState([])
   const [paymentMethod, setPaymentMethod] = useState('Cash') // 'Cash' | 'Banking' | 'Credit'
@@ -144,6 +131,10 @@ export function PosPage() {
   // Mobile Checkout Drawer State
   const [isMobileCartOpen, setIsMobileCartOpen] = useState(false)
 
+  // Commission Breakdown Modal State
+  const [isCommissionModalOpen, setIsCommissionModalOpen] = useState(false)
+  const [commissionActiveTab, setCommissionActiveTab] = useState('unsettled') // 'unsettled' | 'settled'
+
   // Multi-Store Inventory Lookup Modal State
   const [isMultiStoreModalOpen, setIsMultiStoreModalOpen] = useState(false)
   const [inspectProduct, setInspectProduct] = useState(null)
@@ -151,13 +142,7 @@ export function PosPage() {
 
   // Filtered products for inspection modal
   const inspectFilteredProducts = useMemo(() => {
-    const query = inspectSearchQuery.trim().toLowerCase()
-    if (!query) return products
-    return products.filter(p =>
-      p.name.toLowerCase().includes(query) ||
-      (p.code && p.code.toLowerCase().includes(query)) ||
-      (p.category && p.category.toLowerCase().includes(query))
-    )
+    return products.filter(p => matchesProductSearch(p, inspectSearchQuery))
   }, [products, inspectSearchQuery])
 
   // Available categories for filtering
@@ -168,12 +153,8 @@ export function PosPage() {
 
   // Filtered Products by Search Query and Category
   const filteredProducts = useMemo(() => {
-    const query = searchQuery.trim().toLowerCase()
     return products.filter(p => {
-      const matchesSearch = !query ||
-        p.name.toLowerCase().includes(query) ||
-        (p.code && p.code.toLowerCase().includes(query)) ||
-        (p.category && p.category.toLowerCase().includes(query))
+      const matchesSearch = matchesProductSearch(p, searchQuery)
       const matchesCategory = selectedCategory === 'All' || p.category === selectedCategory
       return matchesSearch && matchesCategory
     })
@@ -618,45 +599,71 @@ export function PosPage() {
   return (
     <div className="space-y-4 sm:space-y-6 pb-28 sm:pb-8 animate-in fade-in duration-200">
       
-      {/* POS Top Header: Inline Title + Location Selector (Store or Warehouse) */}
-      <div className="flex items-center justify-between gap-2.5 w-full">
+      {/* POS Top Header: Inline Title + Commission Pill + Location Selector */}
+      <div className="flex items-center justify-between gap-2 w-full flex-wrap sm:flex-nowrap">
         <h1 className="text-xl sm:text-2xl font-black tracking-tight text-slate-900 flex items-center gap-2 shrink-0">
           <ShoppingCart className="w-5 h-5 sm:w-6 sm:h-6 text-emerald-600" />
           <span>POS</span>
         </h1>
 
-        {/* Location Selector moved all the way to the right */}
-        {!isOwner ? (
-          <div className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-100 rounded-xl border border-slate-200 text-xs font-bold text-slate-800 ml-auto shrink-0">
-            <Lock className="w-3.5 h-3.5 text-slate-500 shrink-0" />
-            <span className="truncate max-w-[130px] sm:max-w-none">
-              Store: <span className="text-emerald-700">{activeLocation?.name}</span>
-            </span>
-          </div>
-        ) : (
-          <div className="relative w-auto min-w-[140px] max-w-[200px] sm:min-w-[240px] sm:max-w-[280px] ml-auto">
-            <select
-              value={selectedLocationKey}
-              onChange={(e) => setSelectedLocationKey(e.target.value)}
-              className="w-full text-xs font-bold bg-white border-2 border-emerald-500 rounded-xl px-2.5 py-1.5 sm:px-3 sm:py-2 text-slate-900 shadow-2xs focus:ring-2 focus:ring-emerald-500 focus:outline-none cursor-pointer truncate"
-            >
-              <optgroup label="Retail Stores">
-                {stores.map(store => (
-                  <option key={`store:${store.id}`} value={`store:${store.id}`}>
-                    {store.name}
-                  </option>
-                ))}
-              </optgroup>
-              <optgroup label="Warehouses (Direct Sale)">
-                {warehouses.map(wh => (
-                  <option key={`warehouse:${wh.id}`} value={`warehouse:${wh.id}`}>
-                    {wh.name.toLowerCase().includes('warehouse') ? wh.name : `${wh.name} (Warehouse)`}
-                  </option>
-                ))}
-              </optgroup>
-            </select>
-          </div>
-        )}
+        <div className="flex items-center gap-2 ml-auto">
+          {/* Commission Badge for Current User */}
+          <button
+            type="button"
+            onClick={() => setIsCommissionModalOpen(true)}
+            className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl border text-xs font-bold transition-all cursor-pointer shadow-2xs active:scale-95 ${
+              (currentUserCommissionStats?.unsettledAmount || 0) > 0
+                ? 'bg-emerald-50 text-emerald-950 border-emerald-300 hover:bg-emerald-100 ring-2 ring-emerald-500/20'
+                : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+            }`}
+            title="Click to view your commission breakdown & payout history"
+          >
+            <Coins className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+            <span className="hidden md:inline text-slate-600">Commission:</span>
+            {(currentUserCommissionStats?.unsettledAmount || 0) > 0 ? (
+              <span className="font-black text-emerald-700">
+                +{formatCurrency(currentUserCommissionStats.unsettledAmount)}
+              </span>
+            ) : (
+              <span className="font-semibold text-slate-400 text-[11px]">
+                No commissions earned yet
+              </span>
+            )}
+          </button>
+
+          {/* Location Selector */}
+          {!isOwner ? (
+            <div className="inline-flex items-center gap-1.5 px-2.5 py-1.5 sm:py-2 bg-slate-100 rounded-xl border border-slate-200 text-xs font-bold text-slate-800 shrink-0">
+              <Lock className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+              <span className="truncate max-w-[100px] sm:max-w-none">
+                Store: <span className="text-emerald-700">{activeLocation?.name}</span>
+              </span>
+            </div>
+          ) : (
+            <div className="relative w-auto min-w-[120px] max-w-[170px] sm:min-w-[200px] sm:max-w-[260px]">
+              <select
+                value={selectedLocationKey}
+                onChange={(e) => setSelectedLocationKey(e.target.value)}
+                className="w-full text-xs font-bold bg-white border-2 border-emerald-500 rounded-xl px-2.5 py-1.5 sm:px-3 sm:py-2 text-slate-900 shadow-2xs focus:ring-2 focus:ring-emerald-500 focus:outline-none cursor-pointer truncate"
+              >
+                <optgroup label="Retail Stores">
+                  {stores.map(store => (
+                    <option key={`store:${store.id}`} value={`store:${store.id}`}>
+                      {store.name}
+                    </option>
+                  ))}
+                </optgroup>
+                <optgroup label="Warehouses (Direct Sale)">
+                  {warehouses.map(wh => (
+                    <option key={`warehouse:${wh.id}`} value={`warehouse:${wh.id}`}>
+                      {wh.name.toLowerCase().includes('warehouse') ? wh.name : `${wh.name} (Warehouse)`}
+                    </option>
+                  ))}
+                </optgroup>
+              </select>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Sale Success Notification */}
@@ -725,36 +732,6 @@ export function PosPage() {
             <span className="hidden sm:inline">Check Other Stores</span>
             <span className="sm:hidden">Stock</span>
           </Button>
-
-          {/* View Switcher Toggle (matching InventoryPage design) */}
-          <div className="inline-flex rounded-xl p-0.5 bg-slate-100 border border-slate-200 shrink-0 min-h-[44px] items-center">
-            <button
-              type="button"
-              onClick={() => handleSetPosViewMode('table')}
-              className={`p-2 sm:px-2.5 sm:py-1.5 rounded-lg flex items-center gap-1 text-xs font-bold transition-all cursor-pointer h-full ${
-                posViewMode === 'table'
-                  ? 'bg-white text-slate-900 shadow-xs'
-                  : 'text-slate-400 hover:text-slate-800'
-              }`}
-              title="Table View"
-            >
-              <TableIcon className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Table</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => handleSetPosViewMode('cards')}
-              className={`p-2 sm:px-2.5 sm:py-1.5 rounded-lg flex items-center gap-1 text-xs font-bold transition-all cursor-pointer h-full ${
-                posViewMode === 'cards'
-                  ? 'bg-white text-slate-900 shadow-xs'
-                  : 'text-slate-400 hover:text-slate-800'
-              }`}
-              title="Card View"
-            >
-              <LayoutGrid className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Cards</span>
-            </button>
-          </div>
         </div>
 
         {/* Category Filter Pills (if multiple categories exist) */}
@@ -796,7 +773,7 @@ export function PosPage() {
             <div className="text-center py-12 bg-white rounded-2xl border border-slate-200 text-slate-400 text-sm">
               No products found matching your search or category filter.
             </div>
-          ) : posViewMode === 'table' ? (
+          ) : (
             /* ══════════════════════════════════════════════════════════════════ */
             /* TABLE DESIGN: Clean, Compact POS Table with Instant +/- Stepper    */
             /* ══════════════════════════════════════════════════════════════════ */
@@ -848,6 +825,11 @@ export function PosPage() {
                                 {product.name}
                               </span>
                               <div className="flex items-center gap-1.5 text-[10px] text-slate-400 mt-0.5 flex-wrap leading-tight">
+                                {product.code && (
+                                  <span className="font-mono font-bold text-[9px] px-1.5 py-0.5 bg-slate-100 text-slate-700 rounded border border-slate-200/80 shrink-0">
+                                    {formatProductCode(product.code)}
+                                  </span>
+                                )}
                                 <span className="font-medium text-slate-500 shrink-0">{product.unit || 'Pc'}</span>
                                 {product.category && (
                                   <>
@@ -977,147 +959,6 @@ export function PosPage() {
                   </tbody>
                 </table>
               </div>
-            </div>
-          ) : (
-            /* ══════════════════════════════════════════════════════════════════ */
-            /* CARDS DESIGN: Visual Card Grid with Interactive +/- Stepper         */
-            /* ══════════════════════════════════════════════════════════════════ */
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {filteredProducts.map((product) => {
-                const stockAtStore = activeStore?.stock?.[product.id] || 0
-                const isLow = stockAtStore > 0 && stockAtStore <= (product.minStockThreshold || 5)
-                const isOut = stockAtStore <= 0
-                const inCart = cart.find(i => i.product.id === product.id)
-
-                return (
-                  <div
-                    key={product.id}
-                    onClick={() => !isOut && !inCart && handleAddToCart(product)}
-                    className={`p-4 rounded-2xl border transition-all text-left flex flex-col justify-between touch-manipulation ${
-                      isOut
-                        ? 'bg-slate-50 border-slate-200 opacity-60 cursor-not-allowed'
-                        : inCart
-                        ? 'bg-emerald-50/50 border-emerald-500 ring-2 ring-emerald-500/20 shadow-xs'
-                        : 'bg-white border-slate-200/90 hover:border-emerald-400 hover:shadow-xs cursor-pointer active:scale-[0.98]'
-                    }`}
-                  >
-                    <div>
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-1.5 flex-wrap mb-1">
-                            {product.unit && (
-                              <span className="text-[10px] font-medium text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">
-                                {product.unit}
-                              </span>
-                            )}
-                          </div>
-                          <h4 className="text-sm font-bold text-slate-900 leading-snug">{product.name}</h4>
-                        </div>
-                        <div className="text-right shrink-0">
-                          {product.sellingPriceRange ? (
-                            <>
-                              <span className="text-xs font-extrabold text-emerald-700 block">
-                                {product.sellingPriceRange} ETB
-                              </span>
-                              <span className="text-[9px] text-amber-700 font-semibold bg-amber-50 px-1 py-0.2 rounded border border-amber-200">
-                                Variable Price
-                              </span>
-                            </>
-                          ) : (
-                            <span className="text-sm font-extrabold text-emerald-600 block">
-                              {formatCurrency(product.sellingPrice)}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="mt-4 pt-2.5 border-t border-slate-100 flex items-center justify-between text-xs">
-                      <span className="text-slate-500 font-medium">
-                        Comm: <span className="font-bold text-slate-800">{getProductCommissionRate(product)}%</span>
-                      </span>
-                      <div className="flex items-center gap-1.5">
-                        {isOut ? (
-                          <Badge variant="danger">Out of Stock</Badge>
-                        ) : isLow ? (
-                          <Badge variant="warning">{stockAtStore} left</Badge>
-                        ) : (
-                          <Badge variant="success">{stockAtStore} in store</Badge>
-                        )}
-
-                        {/* Check Other Stores Quick Eye Button */}
-                        <button
-                          type="button"
-                          onClick={(e) => handleInspectStock(e, product)}
-                          title="Check stock at other branches"
-                          className="p-1 rounded-lg text-slate-400 hover:text-emerald-700 hover:bg-slate-100 touch-manipulation cursor-pointer"
-                        >
-                          <Eye className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Interactive Stepper in Cards View */}
-                    {inCart ? (
-                      <div
-                        className="mt-3 pt-2.5 border-t border-emerald-200/80 flex items-center justify-between"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <div className="text-xs font-bold text-emerald-900">
-                          <span>{formatCurrency((inCart.customPrice ?? product.sellingPrice) * inCart.quantity)}</span>
-                        </div>
-                        <div className="inline-flex items-center rounded-lg bg-white border border-emerald-300 p-0.5 shadow-xs">
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              handleUpdateQuantityDelta(product.id, -1)
-                            }}
-                            className="w-7 h-7 rounded-md bg-emerald-50 border border-emerald-200 flex items-center justify-center text-slate-700 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 active:scale-90 transition-all cursor-pointer"
-                            title={inCart.quantity === 1 ? "Remove from cart" : "Decrease quantity"}
-                          >
-                            {inCart.quantity === 1 ? (
-                              <Trash2 className="w-3.5 h-3.5 text-rose-500" />
-                            ) : (
-                              <Minus className="w-3 h-3 text-slate-700" />
-                            )}
-                          </button>
-                          <span className="w-7 text-center font-black text-xs text-emerald-900 select-none">
-                            {inCart.quantity}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              handleUpdateQuantityDelta(product.id, 1)
-                            }}
-                            disabled={inCart.quantity >= stockAtStore}
-                            className="w-7 h-7 rounded-md bg-emerald-600 flex items-center justify-center text-white hover:bg-emerald-700 active:scale-90 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shadow-xs"
-                            title="Increase quantity"
-                          >
-                            <Plus className="w-3 h-3 text-white" />
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="mt-3 pt-2 flex justify-end">
-                        <button
-                          type="button"
-                          disabled={isOut}
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            handleAddToCart(product)
-                          }}
-                          className="w-8 h-8 rounded-lg bg-black hover:bg-emerald-600 text-white flex items-center justify-center transition-all active:scale-90 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shadow-xs"
-                          title="Add to cart"
-                        >
-                          <Plus className="w-4 h-4" />
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                )
-              })}
             </div>
           )}
         </div>
@@ -1376,6 +1217,210 @@ export function PosPage() {
           </div>
         </Modal>
       )}
+
+      {/* Staff Commission & Earnings Modal */}
+      <Modal
+        isOpen={isCommissionModalOpen}
+        onClose={() => setIsCommissionModalOpen(false)}
+        title="My Commission & Earnings"
+      >
+        <div className="space-y-4 text-xs">
+          {/* Identity & Current Balance Header Banner */}
+          <div className="p-4 rounded-2xl bg-gradient-to-br from-slate-900 to-slate-800 text-white shadow-xs space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-white/10 text-white font-black text-sm flex items-center justify-center shrink-0 border border-white/20">
+                  {currentUser?.name ? currentUser.name.slice(0, 2).toUpperCase() : 'SP'}
+                </div>
+                <div>
+                  <h4 className="font-extrabold text-sm text-white leading-tight">
+                    {currentUser?.name || 'Sales Representative'}
+                  </h4>
+                  <p className="text-[11px] text-slate-300 font-mono">
+                    {currentUser?.email || 'Active Store Staff'}
+                  </p>
+                </div>
+              </div>
+              <Badge variant="info" className="bg-emerald-500/20 text-emerald-300 border-emerald-400/30 text-[10px]">
+                💰 Sales Staff
+              </Badge>
+            </div>
+
+            {/* 3 Metric Tiles */}
+            <div className="grid grid-cols-3 gap-2 pt-1 border-t border-white/10 text-center">
+              <div className="bg-white/5 rounded-xl p-2.5 border border-white/10">
+                <span className="block text-[9px] font-bold uppercase tracking-wider text-slate-400">
+                  Pending Payout
+                </span>
+                <span className="text-base sm:text-lg font-black text-emerald-400 mt-0.5 block">
+                  {formatCurrency(currentUserCommissionStats?.unsettledAmount || 0)}
+                </span>
+                <span className="text-[9px] text-slate-400">
+                  {(currentUserCommissionStats?.unsettledAmount || 0) === 0 ? 'No commissions earned yet' : 'Awaiting settlement'}
+                </span>
+              </div>
+
+              <div className="bg-white/5 rounded-xl p-2.5 border border-white/10">
+                <span className="block text-[9px] font-bold uppercase tracking-wider text-slate-400">
+                  Settled Paid
+                </span>
+                <span className="text-base sm:text-lg font-black text-purple-300 mt-0.5 block">
+                  {formatCurrency(currentUserCommissionStats?.settledAmount || 0)}
+                </span>
+                <span className="text-[9px] text-slate-400">
+                  {currentUserCommissionStats?.settlements?.length || 0} payouts
+                </span>
+              </div>
+
+              <div className="bg-white/5 rounded-xl p-2.5 border border-white/10">
+                <span className="block text-[9px] font-bold uppercase tracking-wider text-slate-400">
+                  Total Earned
+                </span>
+                <span className="text-base sm:text-lg font-black text-white mt-0.5 block">
+                  {formatCurrency(currentUserCommissionStats?.totalEarned || 0)}
+                </span>
+                <span className="text-[9px] text-slate-400">
+                  All-time career
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Tab Navigation */}
+          <div className="flex items-center gap-1.5 p-1 bg-slate-100 rounded-xl">
+            <button
+              type="button"
+              onClick={() => setCommissionActiveTab('unsettled')}
+              className={`flex-1 py-1.5 px-3 rounded-lg font-bold text-xs transition-all cursor-pointer ${
+                commissionActiveTab === 'unsettled'
+                  ? 'bg-white text-slate-900 shadow-xs'
+                  : 'text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              Unsettled Sales ({currentUserCommissionStats?.unsettledSales?.length || 0})
+            </button>
+            <button
+              type="button"
+              onClick={() => setCommissionActiveTab('settled')}
+              className={`flex-1 py-1.5 px-3 rounded-lg font-bold text-xs transition-all cursor-pointer ${
+                commissionActiveTab === 'settled'
+                  ? 'bg-white text-slate-900 shadow-xs'
+                  : 'text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              Payout History ({currentUserCommissionStats?.settlements?.length || 0})
+            </button>
+          </div>
+
+          {/* Tab 1: Unsettled Sales List */}
+          {commissionActiveTab === 'unsettled' && (
+            <div className="space-y-2 max-h-[45vh] overflow-y-auto pr-1">
+              {(!currentUserCommissionStats?.unsettledSales || currentUserCommissionStats.unsettledSales.length === 0) ? (
+                <div className="py-8 text-center space-y-1.5">
+                  <Coins className="w-8 h-8 text-slate-300 mx-auto" />
+                  <p className="font-bold text-slate-700 text-xs">No commissions earned yet</p>
+                  <p className="text-[11px] text-slate-400 max-w-xs mx-auto">
+                    When you record POS sales with commission, your pending earnings accumulate here until settled by the owner.
+                  </p>
+                </div>
+              ) : (
+                currentUserCommissionStats.unsettledSales.map((sale) => (
+                  <div
+                    key={sale.id || sale._id}
+                    className="p-3 bg-white border border-slate-200/90 rounded-xl flex items-center justify-between gap-3 shadow-2xs hover:bg-slate-50/60 transition-colors"
+                  >
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-bold text-slate-900 font-mono text-xs">
+                          {sale.receiptNumber || sale.invoiceNumber || 'Sale'}
+                        </span>
+                        <span className="text-[10px] text-slate-400">
+                          &bull; {sale.createdAt ? new Date(sale.createdAt).toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Recently'}
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-slate-500 mt-0.5">
+                        Sale Total: {formatCurrency(sale.totalAmount || sale.total || 0)} ({sale.items?.length || 0} items)
+                      </div>
+                    </div>
+
+                    <div className="text-right shrink-0">
+                      <span className="font-black text-emerald-700 text-sm block">
+                        +{formatCurrency(sale.commissionTotal || sale.commission || 0)}
+                      </span>
+                      <span className="text-[9px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">
+                        Pending Payout
+                      </span>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+
+          {/* Tab 2: Settlement History */}
+          {commissionActiveTab === 'settled' && (
+            <div className="space-y-2 max-h-[45vh] overflow-y-auto pr-1">
+              {(!currentUserCommissionStats?.settlements || currentUserCommissionStats.settlements.length === 0) ? (
+                <div className="py-8 text-center space-y-1.5">
+                  <History className="w-8 h-8 text-slate-300 mx-auto" />
+                  <p className="font-bold text-slate-700 text-xs">No Past Payouts Recorded</p>
+                  <p className="text-[11px] text-slate-400 max-w-xs mx-auto">
+                    Whenever the business owner settles your accumulated commission, payout receipts will be displayed here.
+                  </p>
+                </div>
+              ) : (
+                currentUserCommissionStats.settlements.map((settlement) => (
+                  <div
+                    key={settlement.id || settlement._id}
+                    className="p-3 bg-white border border-slate-200/90 rounded-xl space-y-1.5 shadow-2xs"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <div className="font-extrabold text-slate-900 text-xs">
+                          Payout Received: <span className="text-emerald-700">{formatCurrency(settlement.amount || 0)}</span>
+                        </div>
+                        <div className="text-[10px] text-slate-400 mt-0.5">
+                          {settlement.createdAt ? new Date(settlement.createdAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : 'Recently'}
+                        </div>
+                      </div>
+                      <Badge variant="purple" className="text-[10px] font-bold">
+                        {settlement.paymentMethod || 'Cash'}
+                      </Badge>
+                    </div>
+
+                    <div className="text-[11px] text-slate-500 pt-1 border-t border-slate-100 flex flex-wrap items-center justify-between gap-1">
+                      <span>
+                        Settled by: <strong className="text-slate-700">{settlement.settledByUserName || 'Owner'}</strong>
+                      </span>
+                      {settlement.reference && (
+                        <span className="font-mono text-[10px] bg-slate-100 px-1.5 py-0.5 rounded text-slate-600">
+                          Ref: {settlement.reference}
+                        </span>
+                      )}
+                    </div>
+                    {settlement.notes && (
+                      <p className="text-[10px] text-slate-400 italic">
+                        &ldquo;{settlement.notes}&rdquo;
+                      </p>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+
+          <div className="pt-2 flex justify-end">
+            <Button
+              variant="outline"
+              size="md"
+              onClick={() => setIsCommissionModalOpen(false)}
+              className="w-full sm:w-auto font-bold"
+            >
+              Close
+            </Button>
+          </div>
+        </div>
+      </Modal>
 
     </div>
   )
