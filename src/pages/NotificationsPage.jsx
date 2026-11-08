@@ -173,21 +173,21 @@ export function NotificationsPage() {
 
       {/* Telegram 1-Tap Connect Card (Visible ONLY to Owner) */}
       {isOwnerUser && (
-        <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-blue-950 rounded-2xl p-3.5 sm:p-5 text-white shadow-xs border border-indigo-900/40 space-y-3 sm:space-y-0 sm:flex sm:items-center sm:justify-between gap-4">
+        <div className="bg-gradient-to-r from-slate-950 via-slate-900 to-emerald-950/70 rounded-2xl p-3.5 sm:p-5 text-white shadow-xs border border-emerald-900/30 space-y-3 sm:space-y-0 sm:flex sm:items-center sm:justify-between gap-4">
           <div className="space-y-1">
             <div className="flex flex-wrap items-center gap-1.5">
               <span className="flex h-2 w-2 relative">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400"></span>
               </span>
-              <span className="font-black text-xs sm:text-sm uppercase tracking-wide text-blue-200">
+              <span className="font-black text-xs sm:text-sm uppercase tracking-wide text-emerald-300">
                 Telegram Approvals
               </span>
-              <span className="bg-blue-800/80 text-blue-100 text-[10px] font-bold px-2 py-0.5 rounded-full border border-blue-600/50">
+              <span className="bg-emerald-900/60 text-emerald-200 text-[10px] font-bold px-2 py-0.5 rounded-full border border-emerald-700/50">
                 {telegramSubscribers.length} Connected Approver{telegramSubscribers.length === 1 ? '' : 's'}
               </span>
             </div>
-            <p className="text-[11px] sm:text-xs text-blue-100/90 leading-relaxed max-w-xl">
+            <p className="text-[11px] sm:text-xs text-slate-300 leading-relaxed max-w-xl">
               Accept and reject stock transfers and direct purchases with 1 tap from your phone.
             </p>
           </div>
@@ -198,9 +198,9 @@ export function NotificationsPage() {
                 href={`https://t.me/${botUsername}`}
                 target="_blank"
                 rel="noreferrer"
-                className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-white text-blue-900 font-bold text-xs hover:bg-blue-50 transition-colors shadow-2xs cursor-pointer min-h-[38px]"
+                className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-white text-slate-900 font-bold text-xs hover:bg-slate-50 transition-colors shadow-2xs cursor-pointer min-h-[38px] border border-slate-200"
               >
-                <Send className="w-3.5 h-3.5 text-blue-600" />
+                <Send className="w-3.5 h-3.5 text-emerald-600" />
                 <span>Open @{botUsername}</span>
               </a>
             )}

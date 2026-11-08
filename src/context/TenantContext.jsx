@@ -100,6 +100,16 @@ export function TenantProvider({ children }) {
     clientId ? { clientId } : 'skip'
   )
 
+  const expensesData = useQuery(
+    api.expenses.getExpenses,
+    clientId ? { clientId } : 'skip'
+  )
+
+  const restocksData = useQuery(
+    api.restocks.getRestocks,
+    clientId ? { clientId } : 'skip'
+  )
+
   // Synchronized & Locally Persisted Commission Settlements Store
   const [localSettlements, setLocalSettlements] = useState(() => {
     try {
@@ -143,6 +153,10 @@ export function TenantProvider({ children }) {
   const recordSaleMutation = useMutation(api.sales.recordSale)
   const settleCreditSaleMutation = useMutation(api.sales.settleCreditSale)
   const settleStaffCommissionMutation = useMutation(api.commissions.settleStaffCommission)
+  const addExpenseMutation = useMutation(api.expenses.addExpense)
+  const deleteExpenseMutation = useMutation(api.expenses.deleteExpense)
+  const recordRestockMutation = useMutation(api.restocks.recordRestock)
+  const deleteRestockMutation = useMutation(api.restocks.deleteRestock)
   const approveStaffMutation = useMutation(api.users.approveStaff)
   const rejectStaffMutation = useMutation(api.users.rejectStaff)
   const deleteStaffMutation = useMutation(api.users.deleteStaff)
@@ -925,12 +939,15 @@ export function TenantProvider({ children }) {
       const formattedItems = (items || []).map((it) => {
         const prod = products.find((p) => p.id === it.productId)
         const cost = parseFloat(it.costPerUnit) || parseFloat(it.costPrice) || prod?.costPrice || 0
+        const itemCode = it.productCode || it.code || prod?.code || ''
+        const itemCategory = it.category || prod?.category || targetCategory || 'General'
         return {
           productId: it.productId,
           productName: it.productName || prod?.name || 'Product',
-          productCode: prod?.code || '',
+          productCode: itemCode,
+          category: itemCategory,
           quantity: parseInt(it.quantity, 10) || 1,
-          costPerUnit: 0,
+          costPerUnit: cost,
           unit: it.unit || prod?.unit || 'Piece',
           sellingPrice: it.sellingPrice !== undefined && it.sellingPrice !== '' ? parseFloat(it.sellingPrice) : prod?.sellingPrice,
           minStockThreshold: it.minStockThreshold !== undefined && it.minStockThreshold !== '' ? parseInt(it.minStockThreshold, 10) : (prod?.minStockThreshold || 3),
@@ -1357,6 +1374,172 @@ export function TenantProvider({ children }) {
     }
   }
 
+  // ─── Store Operating Expenses (Real-time Convex sync) ─────────────────────
+  const expenses = useMemo(() => {
+    return Array.isArray(expensesData) ? expensesData : []
+  }, [expensesData])
+
+  const addExpense = async ({ category, amount, note, date, storeId }) => {
+    if (!clientId) throw new Error('No active client selected')
+    try {
+      const res = await addExpenseMutation({
+        clientId,
+        category: category || 'Other',
+        amount: parseFloat(amount) || 0,
+        note: note || undefined,
+        date: date || new Date().toISOString().split('T')[0],
+        storeId: storeId || undefined,
+        recordedBy: currentUser?.name || currentUser?.email || 'Store Owner',
+      })
+
+      try {
+        await logAuditAction({
+          action: 'EXPENSE_RECORDED',
+          description: `Recorded ${category} expense of ${parseFloat(amount).toFixed(2)} ETB${note ? ` (${note})` : ''}`,
+          target: category,
+        })
+      } catch (auditErr) {
+        // ignore audit warning
+      }
+
+      return res
+    } catch (err) {
+      console.error('addExpense failed:', err)
+      throw err
+    }
+  }
+
+  const deleteExpense = async (expenseId) => {
+    try {
+      await deleteExpenseMutation({ expenseId })
+      return true
+    } catch (err) {
+      console.error('deleteExpense failed:', err)
+      throw err
+    }
+  }
+
+  // ─── Real-Time Restocks & Stock Inbound ──────────────────────────────────
+  const restocks = useMemo(() => {
+    const list = []
+    const seenIds = new Set()
+
+    // 1. Records from dedicated restocks table in Convex
+    if (Array.isArray(restocksData)) {
+      restocksData.forEach((r) => {
+        const id = String(r._id || r.id)
+        seenIds.add(id)
+        list.push({
+          ...r,
+          id,
+          source: 'restock',
+        })
+      })
+    }
+
+    // 2. Approved direct purchase requests from approval history (if not duplicate)
+    if (Array.isArray(approvalHistoryData)) {
+      approvalHistoryData
+        .filter((a) => a.type === 'direct_purchase' && (a.status === 'approved' || a.status === 'completed'))
+        .forEach((a) => {
+          const id = `req_${a._id}`
+          if (!seenIds.has(id)) {
+            seenIds.add(id)
+            const totalUnits = (a.items || []).reduce((s, it) => s + (Number(it.quantity) || 0), 0)
+            const totalCost = (a.items || []).reduce(
+              (s, it) => s + (Number(it.quantity) || 0) * (Number(it.costPerUnit) || 0),
+              0
+            )
+            const d = a.reviewedAt || a.createdAt
+            const dateStr = d ? d.split('T')[0] : ''
+            list.push({
+              id,
+              _id: a._id,
+              clientId: a.clientId,
+              destinationType: a.destinationLocationType || 'store',
+              destinationId: a.destinationLocationId || '',
+              destinationName: a.destinationLocationName || 'Store',
+              items: (a.items || []).map((it) => ({
+                productId: it.productId,
+                productName: it.productName || 'Product',
+                productCode: it.productCode || '',
+                category: it.category || 'General',
+                quantity: Number(it.quantity) || 1,
+                costPerUnit: Number(it.costPerUnit) || 0,
+                sellingPrice: Number(it.sellingPrice) || 0,
+                unit: it.unit || 'Piece',
+              })),
+              totalUnits,
+              totalCost: a.totalCost || (totalCost > 0 ? totalCost : undefined),
+              paymentMethod: a.paymentMethod || 'Cash',
+              supplierName: a.supplierName,
+              notes: a.notes,
+              recordedBy: a.reviewedByUserName || a.requestedByUserName || 'Owner',
+              date: dateStr,
+              createdAt: a.createdAt,
+              source: 'approval',
+            })
+          }
+        })
+    }
+
+    return list.sort((a, b) => {
+      const tA = new Date(a.date || a.createdAt || 0).getTime()
+      const tB = new Date(b.date || b.createdAt || 0).getTime()
+      return tB - tA
+    })
+  }, [restocksData, approvalHistoryData])
+
+  const recordRestock = async ({
+    destinationType = 'store',
+    destinationId,
+    destinationName,
+    items = [],
+    paymentMethod = 'Cash',
+    supplierName,
+    notes,
+    date,
+  }) => {
+    if (!clientId) throw new Error('No active client selected')
+    try {
+      const res = await recordRestockMutation({
+        clientId,
+        destinationType,
+        destinationId: destinationId || (destinationType === 'warehouse' ? (warehouses[0]?.id || '') : (stores[0]?.id || '')),
+        destinationName: destinationName || (destinationType === 'warehouse' ? (warehouses[0]?.name || 'Warehouse') : (stores[0]?.name || 'Store')),
+        items: items.map((it) => ({
+          productId: it.productId,
+          productName: it.productName || 'Product',
+          productCode: it.productCode || undefined,
+          category: it.category || 'General',
+          quantity: Number(it.quantity) || 1,
+          costPerUnit: it.costPerUnit !== undefined && it.costPerUnit !== '' ? Number(it.costPerUnit) : 0,
+          sellingPrice: it.sellingPrice !== undefined && it.sellingPrice !== '' ? Number(it.sellingPrice) : 0,
+          unit: it.unit || 'Piece',
+        })),
+        paymentMethod,
+        supplierName: supplierName || undefined,
+        notes: notes || undefined,
+        recordedBy: currentUser?.name || currentUser?.email || 'Store Owner',
+        date: date || new Date().toISOString().split('T')[0],
+      })
+      return res
+    } catch (err) {
+      console.error('recordRestock failed:', err)
+      throw err
+    }
+  }
+
+  const deleteRestock = async (restockId) => {
+    try {
+      await deleteRestockMutation({ restockId })
+      return true
+    } catch (err) {
+      console.error('deleteRestock failed:', err)
+      throw err
+    }
+  }
+
   // ─── Staff & Business Actions ────────────────────────────────────────────
 
   const approveStaffMember = async (staffId, storeId) => {
@@ -1555,7 +1738,7 @@ export function TenantProvider({ children }) {
   const clearDatabaseData = async () => {
     if (!clientId) return false
     try {
-      await clearOrganizationDataMutation({ clientId })
+      await clearOrganizationDataMutation({ clientId, requesterUserId: currentUser?.id })
       return true
     } catch (err) {
       console.error('clearDatabaseData failed:', err)
@@ -1567,7 +1750,7 @@ export function TenantProvider({ children }) {
   const wipeAndResetAccount = async () => {
     if (!clientId) return false
     try {
-      await wipeClientAndResetMutation({ clientId })
+      await wipeClientAndResetMutation({ clientId, requesterUserId: currentUser?.id })
       return true
     } catch (err) {
       console.error('wipeAndResetAccount failed:', err)
@@ -1656,6 +1839,14 @@ export function TenantProvider({ children }) {
         getStaffCommissionStats,
         currentUserCommissionStats,
         settleStaffCommission,
+        // Real-time Operating Expenses
+        expenses,
+        addExpense,
+        deleteExpense,
+        // Real-time Restocks & Inbound
+        restocks,
+        recordRestock,
+        deleteRestock,
         // Telegram Bot Real-time Sync
         telegramSubscribers: telegramSubscribersData || [],
         ensureTelegramWebhook: () => ensureTelegramWebhookAction({}),

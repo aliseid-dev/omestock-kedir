@@ -421,6 +421,7 @@ export function InventoryPage() {
   const [isSubmittingRestock, setIsSubmittingRestock] = useState(false)
 
   const [restockNewForm, setRestockNewForm] = useState({
+    code: '',
     name: '',
     category: 'General',
     unit: 'Piece',
@@ -470,17 +471,74 @@ export function InventoryPage() {
     return Array.from(set).sort((a, b) => a.localeCompare(b))
   }, [products])
 
+  // Suggested next available numeric product code ID (e.g. SP-36)
+  const nextAvailableProductCode = useMemo(() => {
+    let maxNum = 0
+    ;(products || []).forEach(p => {
+      const digits = extractProductCodeDigits(p.code)
+      if (digits) {
+        const num = parseInt(digits, 10)
+        if (!isNaN(num) && num > maxNum) {
+          maxNum = num
+        }
+      }
+    })
+    return maxNum > 0 ? String(maxNum + 1) : '101'
+  }, [products])
+
+  // Check if entered product ID code already exists in catalog
+  const restockNewDuplicateCodeProduct = useMemo(() => {
+    const rawDigits = extractProductCodeDigits(restockNewForm.code)
+    if (!rawDigits) return null
+    const targetNum = parseInt(rawDigits, 10)
+    return (products || []).find(p => {
+      const pDigits = extractProductCodeDigits(p.code)
+      return pDigits && parseInt(pDigits, 10) === targetNum
+    }) || null
+  }, [products, restockNewForm.code])
+
+  // Check if entered product name already exists in catalog
+  const restockNewDuplicateNameProduct = useMemo(() => {
+    const trimmed = (restockNewForm.name || '').trim().toLowerCase()
+    if (!trimmed) return null
+    return (products || []).find(p => (p.name || '').trim().toLowerCase() === trimmed) || null
+  }, [products, restockNewForm.name])
+
   const handleRestockNewSubmit = async (e) => {
     e.preventDefault()
-    if (!restockNewForm.name.trim()) {
+    const trimmedName = restockNewForm.name.trim()
+    if (!trimmedName) {
       toast.error('Validation Error', 'Product name is required.')
       return
     }
+
+    // Guard against duplicate product names
+    if (restockNewDuplicateNameProduct) {
+      toast.error(
+        'Duplicate Product Name',
+        `A product named "${restockNewDuplicateNameProduct.name}" (${formatProductCode(restockNewDuplicateNameProduct.code) || 'No ID'}) already exists in your inventory. Please use "Restock — Existing Item" or enter a unique product name.`
+      )
+      return
+    }
+
+    // Guard against duplicate product IDs
+    const rawDigits = extractProductCodeDigits(restockNewForm.code)
+    if (rawDigits && restockNewDuplicateCodeProduct) {
+      toast.error(
+        'Duplicate Product ID',
+        `Product ID "SP-${rawDigits}" is already assigned to "${restockNewDuplicateCodeProduct.name}". Please choose a different ID.`
+      )
+      return
+    }
+
     const qty = parseFloat(restockNewForm.quantity)
     if (!qty || qty <= 0) {
       toast.error('Validation Error', 'Please enter a valid quantity greater than 0.')
       return
     }
+
+    const numericCode = rawDigits || nextAvailableProductCode
+    const formattedCode = numericCode ? `SP-${numericCode}` : undefined
 
     setIsSubmittingRestock(true)
     try {
@@ -503,7 +561,9 @@ export function InventoryPage() {
         destinationName: activeLocation.name,
         items: [{
           productId: 'new_item',
-          productName: restockNewForm.name.trim(),
+          productName: trimmedName,
+          code: formattedCode,
+          productCode: formattedCode,
           category: restockNewForm.category,
           unit: restockNewForm.unit,
           quantity: qty,
@@ -523,9 +583,10 @@ export function InventoryPage() {
       setIsRestockNewOpen(false)
       toast.info(
         'Restock Request Sent',
-        `New item "${restockNewForm.name.trim()}" (+${qty} ${restockNewForm.unit}) sent to Owner for instant review & approval.`
+        `New item "${trimmedName}" (${formattedCode || ''}, +${qty} ${restockNewForm.unit}) sent to Owner for instant review & approval.`
       )
       setRestockNewForm({
+        code: '',
         name: '',
         category: 'General',
         unit: 'Piece',
@@ -784,7 +845,9 @@ export function InventoryPage() {
     } else {
       const stockMap = activeLocation.stock || {}
       products.forEach(p => {
-        const isStocked = Object.prototype.hasOwnProperty.call(stockMap, p.id) && stockMap[p.id] !== undefined
+        const isStocked = activeLocationType === 'store'
+          ? true
+          : (Object.prototype.hasOwnProperty.call(stockMap, p.id) && stockMap[p.id] !== undefined)
         if (isStocked) {
           // If in warehouse and 0 stock, only count if it's genuinely a warehouse product
           if (activeLocationType === 'warehouse' && (stockMap[p.id] || 0) <= 0) {
@@ -802,8 +865,10 @@ export function InventoryPage() {
     if (!activeLocation) return []
     const stockMap = activeLocation.stock || {}
     return products.filter(p => {
-      // Must be stocked / allocated in this location
-      const isStocked = Object.prototype.hasOwnProperty.call(stockMap, p.id) && stockMap[p.id] !== undefined
+      // Must be stocked / allocated in this location (in store, all catalog items are visible)
+      const isStocked = activeLocationType === 'store'
+        ? true
+        : (Object.prototype.hasOwnProperty.call(stockMap, p.id) && stockMap[p.id] !== undefined)
       if (!isStocked) return false
 
       // Guard against ghost 0-stock entries in warehouse: if in warehouse with 0 stock, only show genuine warehouse products
@@ -1192,6 +1257,15 @@ export function InventoryPage() {
 
     const trimmedName = warehouseAddProductForm.name.trim()
     const trimmedCode = `SP-${numericCode}`
+
+    const dupByCode = products.find(p => {
+      const pDigits = extractProductCodeDigits(p.code)
+      return pDigits && parseInt(pDigits, 10) === parseInt(numericCode, 10) && p.name.trim().toLowerCase() !== trimmedName.toLowerCase()
+    })
+    if (dupByCode) {
+      toast.error('Duplicate Product ID', `Product ID "${trimmedCode}" is already in use by "${dupByCode.name}". Please pick a unique ID.`)
+      return
+    }
     const qty = parseInt(warehouseAddProductForm.initialQuantity, 10)
     const cost = parseFloat(warehouseAddProductForm.costPrice) || 0
     const selling = parseFloat(warehouseAddProductForm.sellingPrice) || 0
@@ -1220,14 +1294,18 @@ export function InventoryPage() {
             productId: targetProductId,
             productName: targetProductName,
             code: trimmedCode,
+            productCode: trimmedCode,
+            category: category,
             quantity: qty > 0 ? qty : 1,
             costPerUnit: cost,
             unit: unit,
             sellingPrice: selling > 0 ? selling : undefined,
             minStockThreshold: minThreshold,
+            isNewItem: targetProductId === 'new_item',
           }],
           paymentMethod: 'Direct Intake',
           notes: `Stock addition request by ${currentUser?.name || 'Salesperson'}`,
+          isNewItem: targetProductId === 'new_item',
         })
 
         setIsWarehouseAddProductOpen(false)
@@ -1392,15 +1470,19 @@ export function InventoryPage() {
             productId: targetProductId,
             productName: targetProductName,
             code: isWarehousePurchaseNewProduct && newProductCode ? newProductCode.trim() : undefined,
+            productCode: isWarehousePurchaseNewProduct && newProductCode ? newProductCode.trim() : undefined,
+            category: isWarehousePurchaseNewProduct ? (newProductCategory || 'General') : undefined,
             quantity: qty,
             costPerUnit: cost,
             unit: targetProductUnit,
             sellingPrice: isWarehousePurchaseNewProduct && newProductSellingPrice ? parseFloat(newProductSellingPrice) : undefined,
             minStockThreshold: 5,
+            isNewItem: isWarehousePurchaseNewProduct,
           }],
           paymentMethod,
           bankProvider: bankProviderName,
           supplierName: supplierStr,
+          isNewItem: isWarehousePurchaseNewProduct,
         })
         setIsWarehouseDirectPurchaseOpen(false)
         setIsWarehousePurchaseNewProduct(false)
@@ -1561,6 +1643,15 @@ export function InventoryPage() {
 
     const trimmedName = storeAddProductForm.name.trim()
     const trimmedCode = `SP-${numericCode}`
+
+    const dupByCode = products.find(p => {
+      const pDigits = extractProductCodeDigits(p.code)
+      return pDigits && parseInt(pDigits, 10) === parseInt(numericCode, 10) && p.name.trim().toLowerCase() !== trimmedName.toLowerCase()
+    })
+    if (dupByCode) {
+      toast.error('Duplicate Product ID', `Product ID "${trimmedCode}" is already in use by "${dupByCode.name}". Please pick a unique ID.`)
+      return
+    }
     const qty = parseInt(storeAddProductForm.initialQuantity, 10)
     const cost = parseFloat(storeAddProductForm.costPrice) || 0
     const selling = parseFloat(storeAddProductForm.sellingPrice) || 0
@@ -1589,14 +1680,18 @@ export function InventoryPage() {
             productId: targetProductId,
             productName: targetProductName,
             code: trimmedCode,
+            productCode: trimmedCode,
+            category: category,
             quantity: qty > 0 ? qty : 1,
             costPerUnit: cost,
             unit: unit,
             sellingPrice: selling > 0 ? selling : undefined,
             minStockThreshold: minThreshold,
+            isNewItem: targetProductId === 'new_item',
           }],
           paymentMethod: 'Direct Intake',
           notes: `Stock addition request by ${currentUser?.name || 'Salesperson'}`,
+          isNewItem: targetProductId === 'new_item',
         })
 
         setIsStoreAddProductOpen(false)
@@ -1760,15 +1855,19 @@ export function InventoryPage() {
             productId: targetProductId,
             productName: targetProductName,
             code: isStorePurchaseNewProduct && storeDirectPurchaseForm.newProductCode ? storeDirectPurchaseForm.newProductCode.trim() : undefined,
+            productCode: isStorePurchaseNewProduct && storeDirectPurchaseForm.newProductCode ? storeDirectPurchaseForm.newProductCode.trim() : undefined,
+            category: isStorePurchaseNewProduct ? (storeDirectPurchaseForm.newProductCategory || 'General') : undefined,
             quantity: qty,
             costPerUnit: cost,
             unit: targetProductUnit,
             sellingPrice: isStorePurchaseNewProduct && newProductSellingPrice ? parseFloat(newProductSellingPrice) : undefined,
             minStockThreshold: 5,
+            isNewItem: isStorePurchaseNewProduct,
           }],
           paymentMethod,
           bankProvider: bankProviderName,
           supplierName: supplierStr,
+          isNewItem: isStorePurchaseNewProduct,
         })
         setIsStoreDirectPurchaseOpen(false)
         setIsStorePurchaseNewProduct(false)
@@ -2633,10 +2732,12 @@ export function InventoryPage() {
                       onClick={() => {
                         setIsRestockMenuOpen(false)
                         setRestockNewForm({
+                          code: nextAvailableProductCode || '',
                           name: '',
                           category: 'General',
                           unit: 'Piece',
                           quantity: '10',
+                          sellingPrice: '',
                           paymentMethod: 'Banking',
                           bankProvider: 'cbe',
                           bankReference: '',
@@ -4228,21 +4329,113 @@ export function InventoryPage() {
               </span>
             </div>
 
-            {/* Product Name */}
-            <div>
-              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                Product Name *
-              </label>
-              <input
-                type="text"
-                required
-                autoFocus
-                placeholder="e.g. Total Quartz 9000 5W-40"
-                value={restockNewForm.name}
-                onChange={(e) => setRestockNewForm(prev => ({ ...prev, name: e.target.value }))}
-                className="w-full p-2.5 bg-white border border-slate-300 rounded-xl font-bold text-slate-900 text-sm min-h-[44px] focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
-              />
+            {/* Product Name & Product ID (With duplicate check and ID option) */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="sm:col-span-2">
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  Product Name *
+                </label>
+                <input
+                  type="text"
+                  required
+                  autoFocus
+                  placeholder="e.g. Total Quartz 9000 5W-40"
+                  value={restockNewForm.name}
+                  onChange={(e) => setRestockNewForm(prev => ({ ...prev, name: e.target.value }))}
+                  className={`w-full p-2.5 bg-white border rounded-xl font-bold text-slate-900 text-sm min-h-[44px] focus:outline-none focus:ring-2 ${
+                    restockNewDuplicateNameProduct
+                      ? 'border-amber-400 focus:ring-amber-400/20 bg-amber-50/20'
+                      : 'border-slate-300 focus:ring-emerald-500/20'
+                  }`}
+                />
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
+                    Product ID
+                  </label>
+                  {nextAvailableProductCode && (
+                    <button
+                      type="button"
+                      onClick={() => setRestockNewForm(prev => ({ ...prev, code: nextAvailableProductCode }))}
+                      className="text-[10px] font-bold text-emerald-600 hover:text-emerald-700 underline cursor-pointer"
+                      title={`Auto-fill with next available ID: SP-${nextAvailableProductCode}`}
+                    >
+                      Next: SP-{nextAvailableProductCode}
+                    </button>
+                  )}
+                </div>
+                <div className={`flex items-center rounded-xl border bg-white overflow-hidden min-h-[44px] focus-within:ring-2 ${
+                  restockNewDuplicateCodeProduct
+                    ? 'border-rose-400 focus-within:ring-rose-400/20 bg-rose-50/20'
+                    : 'border-slate-300 focus-within:ring-emerald-500/20'
+                }`}>
+                  <span className="bg-slate-100 text-slate-700 font-black text-xs px-3 py-2.5 border-r border-slate-200 select-none shrink-0">
+                    SP-
+                  </span>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    placeholder={nextAvailableProductCode || '101'}
+                    value={extractProductCodeDigits(restockNewForm.code)}
+                    onChange={(e) => {
+                      const digits = extractProductCodeDigits(e.target.value)
+                      setRestockNewForm(prev => ({ ...prev, code: digits }))
+                    }}
+                    className="w-full p-2.5 bg-transparent font-mono font-bold text-slate-900 text-sm focus:outline-none"
+                  />
+                </div>
+              </div>
             </div>
+
+            {/* Duplicate Product Name Warning */}
+            {restockNewDuplicateNameProduct && (
+              <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5 animate-in fade-in">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-bold text-amber-950">Duplicate Product Warning:</span>
+                    <span className="block text-amber-900 mt-0.5">
+                      "<b>{restockNewDuplicateNameProduct.name}</b>" ({formatProductCode(restockNewDuplicateNameProduct.code) || 'No ID'}) already exists in your catalog.
+                    </span>
+                    <span className="block text-[11px] text-amber-700 mt-0.5">
+                      Current Stock at {activeLocation?.name || 'Store'}: <b>{activeLocation?.stock?.[restockNewDuplicateNameProduct.id] ?? 0} {restockNewDuplicateNameProduct.unit || 'units'}</b>
+                    </span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsRestockNewOpen(false)
+                    setRestockExistingForm({
+                      productId: restockNewDuplicateNameProduct.id,
+                      quantity: restockNewForm.quantity || '10',
+                      sellingPrice: restockNewForm.sellingPrice || (restockNewDuplicateNameProduct.sellingPrice ? String(restockNewDuplicateNameProduct.sellingPrice) : ''),
+                      paymentMethod: restockNewForm.paymentMethod,
+                      bankProvider: restockNewForm.bankProvider,
+                      bankReference: restockNewForm.bankReference,
+                      telebirrReference: restockNewForm.telebirrReference,
+                    })
+                    setIsRestockExistingOpen(true)
+                  }}
+                  className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-bold text-xs shrink-0 self-start sm:self-auto cursor-pointer transition-colors shadow-2xs"
+                >
+                  Restock Existing Instead
+                </button>
+              </div>
+            )}
+
+            {/* Duplicate Product ID Warning */}
+            {restockNewDuplicateCodeProduct && (
+              <div className="flex items-center gap-2 p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-semibold animate-in fade-in">
+                <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                <span>
+                  Product ID <b>SP-{extractProductCodeDigits(restockNewForm.code)}</b> is already used by "<b>{restockNewDuplicateCodeProduct.name}</b>". Please choose a different ID.
+                </span>
+              </div>
+            )}
 
             {/* Category (SELECT) and Unit (SELECT) */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -4444,8 +4637,8 @@ export function InventoryPage() {
               <Button
                 type="submit"
                 variant="primary"
-                disabled={isSubmittingRestock}
-                className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold"
+                disabled={isSubmittingRestock || Boolean(restockNewDuplicateNameProduct) || (Boolean(extractProductCodeDigits(restockNewForm.code)) && Boolean(restockNewDuplicateCodeProduct))}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isSubmittingRestock ? (
                   <span className="flex items-center gap-1.5">

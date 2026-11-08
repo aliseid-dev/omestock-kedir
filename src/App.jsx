@@ -17,7 +17,8 @@ import { UnpaidSalesPage } from './pages/UnpaidSalesPage'
 import { AuditTrailPage } from './pages/AuditTrailPage'
 import { ProfilePage } from './pages/ProfilePage'
 import { NotificationsPage } from './pages/NotificationsPage'
-import { Loader2 } from 'lucide-react'
+import { DashboardPage } from './pages/DashboardPage'
+import { AppSkeleton } from './components/ui/AppSkeleton'
 
 function AppContent() {
   const { authLoading, isSignedIn, convexUser, isPending } = useAuth()
@@ -28,17 +29,9 @@ function AppContent() {
     return <AuthenticateWithRedirectCallback />
   }
 
-  // 1. Initial Authentication & Profile Sync Loading Screen
+  // 1. Initial Authentication & Profile Sync Skeleton Screen
   if (authLoading) {
-    return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-slate-900 text-white gap-3">
-        <div className="w-12 h-12 rounded-2xl bg-blue-600 text-white flex items-center justify-center font-bold text-xl shadow-lg shadow-blue-500/30">
-          O
-        </div>
-        <Loader2 className="w-5 h-5 text-blue-400 animate-spin" />
-        <p className="text-xs text-slate-400 font-medium">Connecting to OMESTOCK workspace…</p>
-      </div>
-    )
+    return <AppSkeleton />
   }
 
   // 2. Not logged in -> Show Sign In / Sign Up Page
@@ -71,7 +64,7 @@ function AppContent() {
         <Route path="notifications" element={<NotificationsPage />} />
 
         {/* Secondary modules */}
-        <Route path="dashboard" element={<ComingSoonPage title="Executive Analytics Dashboard" />} />
+        <Route path="dashboard" element={<DashboardPage />} />
         <Route path="profile" element={<ProfilePage />} />
         <Route path="org-hub" element={<ComingSoonPage title="Multi-Branch Organization Hub" />} />
 

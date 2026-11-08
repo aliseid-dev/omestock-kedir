@@ -201,4 +201,44 @@ export default defineSchema({
     originalMessageId: v.optional(v.number()),
     updatedAt: v.string(),
   }).index("by_chatId", ["chatId"]),
+
+  // Store Operating Expenses (Overhead, Rent, Utilities, Logistics, etc.)
+  expenses: defineTable({
+    clientId: v.id("clients"),
+    storeId: v.optional(v.string()),
+    category: v.string(),
+    amount: v.number(),
+    note: v.optional(v.string()),
+    date: v.string(),
+    recordedBy: v.optional(v.string()),
+    createdAt: v.string(),
+  }).index("by_clientId", ["clientId"]),
+
+  // Stock Inbound & Restock Records (Warehouse inbound, store direct purchases, restocks)
+  restocks: defineTable({
+    clientId: v.id("clients"),
+    destinationType: v.string(), // "warehouse" | "store"
+    destinationId: v.string(),
+    destinationName: v.string(),
+    items: v.array(
+      v.object({
+        productId: v.string(),
+        productName: v.string(),
+        productCode: v.optional(v.string()),
+        category: v.optional(v.string()),
+        quantity: v.number(),
+        costPerUnit: v.optional(v.number()),
+        sellingPrice: v.optional(v.number()),
+        unit: v.optional(v.string()),
+      })
+    ),
+    totalUnits: v.number(),
+    totalCost: v.optional(v.number()),
+    paymentMethod: v.optional(v.string()),
+    supplierName: v.optional(v.string()),
+    notes: v.optional(v.string()),
+    recordedBy: v.optional(v.string()),
+    date: v.string(), // YYYY-MM-DD
+    createdAt: v.string(),
+  }).index("by_clientId", ["clientId"]),
 });

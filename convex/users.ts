@@ -277,8 +277,24 @@ export const deleteUserAccount = mutation({
 export const clearOrganizationData = mutation({
   args: {
     clientId: v.id("clients"),
+    requesterUserId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    if (args.requesterUserId) {
+      const user = await ctx.db
+        .query("users")
+        .filter((q) =>
+          q.or(
+            q.eq(q.field("_id"), args.requesterUserId as any),
+            q.eq(q.field("userId"), args.requesterUserId)
+          )
+        )
+        .first();
+      if (user && user.role !== "owner") {
+        throw new Error("Unauthorized: Only business owners are authorized to clear organization data.");
+      }
+    }
+
     // 1. Delete all sales for this client
     const sales = await ctx.db
       .query("sales")
@@ -341,8 +357,24 @@ export const clearOrganizationData = mutation({
 export const wipeClientAndReset = mutation({
   args: {
     clientId: v.id("clients"),
+    requesterUserId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    if (args.requesterUserId) {
+      const user = await ctx.db
+        .query("users")
+        .filter((q) =>
+          q.or(
+            q.eq(q.field("_id"), args.requesterUserId as any),
+            q.eq(q.field("userId"), args.requesterUserId)
+          )
+        )
+        .first();
+      if (user && user.role !== "owner") {
+        throw new Error("Unauthorized: Only business owners are authorized to wipe workspace data.");
+      }
+    }
+
     const sales = await ctx.db
       .query("sales")
       .withIndex("by_clientId", (q) => q.eq("clientId", args.clientId))

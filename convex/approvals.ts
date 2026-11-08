@@ -223,10 +223,9 @@ export const approveRequest = mutation({
       const resolveProdKey = (item: { productId: string; productName?: string }) => {
         if (sourceStock[item.productId] !== undefined) return item.productId;
         if (item.productName) {
-          const cleanItemName = item.productName.toLowerCase().replace(/[^a-z0-9]/g, "");
+          const cleanItemName = item.productName.toLowerCase().trim();
           const match = clientProducts.find((p) => {
-            const cleanProdName = p.name.toLowerCase().replace(/[^a-z0-9]/g, "");
-            return cleanProdName.includes(cleanItemName) || cleanItemName.includes(cleanProdName);
+            return p.name.trim().toLowerCase() === cleanItemName;
           });
           if (match) return match._id;
         }
@@ -316,17 +315,41 @@ export const approveRequest = mutation({
             .collect()
         : [];
 
+      const clientStores = request.clientId
+        ? await ctx.db
+            .query("stores")
+            .withIndex("by_clientId", (q) => q.eq("clientId", request.clientId))
+            .collect()
+        : [];
+
+      const processedProductKeys: string[] = [];
+
       for (const item of request.items) {
         if (item.quantity <= 0) continue;
         let prodKey = item.productId;
-        let matchedProd = clientProducts.find((p) => p._id === prodKey);
+        let matchedProd: any = null;
 
-        if (!matchedProd && item.productName) {
-          const cleanItemName = item.productName.toLowerCase().replace(/[^a-z0-9]/g, "");
-          matchedProd = clientProducts.find((p) => {
-            const cleanProdName = p.name.toLowerCase().replace(/[^a-z0-9]/g, "");
-            return cleanProdName === cleanItemName || cleanProdName.includes(cleanItemName) || cleanItemName.includes(cleanProdName);
-          });
+        if (prodKey && prodKey !== "new_item") {
+          matchedProd = clientProducts.find((p) => p._id === prodKey);
+        }
+
+        // Strictly exact matching if not matched by ID (prevents substring word hijacking)
+        if (!matchedProd) {
+          const itemCode = (item.productCode || (item as any).code || "").trim().toLowerCase();
+          const itemName = (item.productName || "").trim().toLowerCase();
+
+          if (itemCode) {
+            matchedProd = clientProducts.find(
+              (p) => p.code && p.code.trim().toLowerCase() === itemCode
+            );
+          }
+
+          if (!matchedProd && itemName) {
+            matchedProd = clientProducts.find(
+              (p) => p.name.trim().toLowerCase() === itemName
+            );
+          }
+
           if (matchedProd) prodKey = matchedProd._id;
         }
 
@@ -335,7 +358,10 @@ export const approveRequest = mutation({
           (c) => c.productId === item.productId || c.productId === prodKey
         );
 
-        const costPrice = 0;
+        const costPrice =
+          (config as any)?.costPrice !== undefined
+            ? (config as any).costPrice
+            : (item.costPerUnit || (item as any).costPrice || 0);
 
         const sellingPrice =
           (config?.sellingPrice !== undefined && config.sellingPrice > 0)
@@ -350,7 +376,7 @@ export const approveRequest = mutation({
         const unit = config?.unit || item.unit || matchedProd?.unit || "Piece";
 
         const nameToCheck = (matchedProd?.name || item.productName || "");
-        const categoryToCheck = (matchedProd?.category || "");
+        const categoryToCheck = (matchedProd?.category || (item as any).category || "");
         const isOil = isOilInLiterProduct(nameToCheck, categoryToCheck, unit);
         const defaultCommission = isOil ? 0.5 : 2.5;
 
@@ -367,7 +393,7 @@ export const approveRequest = mutation({
           await ctx.db.patch(matchedProd._id, {
             sellingPrice,
             minStockThreshold,
-            costPrice: 0,
+            costPrice,
             unit,
             defaultCommissionRate: commRate,
           });
@@ -375,14 +401,16 @@ export const approveRequest = mutation({
         } else if (request.clientId && item.productName) {
           const notesCategory = request.notes?.match(/\[Category:\s*([^\]]+)\]/i)?.[1]?.trim();
           const finalCategory = (item as any).category?.trim() || notesCategory || "General";
+          const finalCode = item.productCode?.trim() || (item as any).code?.trim() || undefined;
+
           const newProdId = await ctx.db.insert("products", {
             clientId: request.clientId,
             name: item.productName.trim(),
-            code: item.productCode?.trim() || undefined,
+            code: finalCode,
             category: finalCategory,
             unit,
             sellingPrice,
-            costPrice: 0,
+            costPrice,
             defaultCommissionRate: defaultCommission,
             minStockThreshold,
             createdAt: now,
@@ -391,9 +419,22 @@ export const approveRequest = mutation({
         }
 
         currentStock[prodKey] = (currentStock[prodKey] || 0) + item.quantity;
+        processedProductKeys.push(prodKey);
       }
 
       await ctx.db.patch(destination._id, { stock: currentStock });
+
+      // Ensure all retail stores have an entry in their stock map for all approved products
+      for (const pKey of processedProductKeys) {
+        for (const store of clientStores) {
+          if (store._id === destination._id) continue;
+          const storeStock = { ...(store.stock || {}) };
+          if (storeStock[pKey] === undefined) {
+            storeStock[pKey] = 0;
+            await ctx.db.patch(store._id, { stock: storeStock });
+          }
+        }
+      }
 
       await ctx.db.insert("auditLogs", {
         clientId: request.clientId,
@@ -405,6 +446,36 @@ export const approveRequest = mutation({
         target: request._id,
         timestamp: now,
       });
+
+      try {
+        const totalUnits = request.items.reduce((s, it) => s + (it.quantity || 0), 0);
+        await ctx.db.insert("restocks", {
+          clientId: request.clientId,
+          destinationType: request.destinationLocationType || "store",
+          destinationId: destination._id,
+          destinationName: destination.name,
+          items: request.items.map((it) => ({
+            productId: it.productId,
+            productName: it.productName,
+            productCode: it.productCode,
+            category: it.category,
+            quantity: it.quantity,
+            costPerUnit: it.costPerUnit || 0,
+            sellingPrice: it.sellingPrice,
+            unit: it.unit,
+          })),
+          totalUnits,
+          totalCost: request.totalCost || undefined,
+          paymentMethod: request.paymentMethod || "Cash",
+          supplierName: request.supplierName,
+          notes: request.notes,
+          recordedBy: args.reviewerUserName || request.requestedByUserName,
+          date: now.split("T")[0],
+          createdAt: now,
+        });
+      } catch (rErr) {
+        console.warn("Restock log insert warning:", rErr);
+      }
     }
 
     // Mark as approved

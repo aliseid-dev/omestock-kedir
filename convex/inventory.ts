@@ -263,6 +263,20 @@ export const createProduct = mutation({
       }
     }
 
+    // Ensure all client stores have an initial entry in their stock map
+    const allStores = await ctx.db
+      .query("stores")
+      .withIndex("by_clientId", (q) => q.eq("clientId", args.clientId))
+      .collect();
+    for (const st of allStores) {
+      if (args.initialStoreId && st._id === args.initialStoreId) continue;
+      const stock = { ...(st.stock || {}) };
+      if (stock[productId] === undefined) {
+        stock[productId] = 0;
+        await ctx.db.patch(st._id, { stock });
+      }
+    }
+
     return await ctx.db.get(productId);
   },
 });
@@ -530,6 +544,35 @@ export const recordWarehouseInbound = mutation({
     }
 
     await ctx.db.patch(args.warehouseId, { stock: whStock });
+
+    const now = new Date().toISOString();
+    const effectiveDate = now.split("T")[0];
+    const totalUnits = args.items.reduce((acc, it) => acc + (it.quantity || 0), 0);
+    const totalCost = args.items.reduce((acc, it) => acc + ((it.quantity || 0) * (it.costPerUnit || 0)), 0);
+
+    try {
+      await ctx.db.insert("restocks", {
+        clientId: warehouse.clientId,
+        destinationType: "warehouse",
+        destinationId: warehouse._id,
+        destinationName: warehouse.name,
+        items: args.items.map((it) => ({
+          productId: it.productId,
+          productName: it.productName || "Product",
+          quantity: it.quantity,
+          costPerUnit: it.costPerUnit || 0,
+        })),
+        totalUnits,
+        totalCost: totalCost > 0 ? totalCost : undefined,
+        paymentMethod: args.paymentMethod || "Cash",
+        supplierName: args.supplierName,
+        date: effectiveDate,
+        createdAt: now,
+      });
+    } catch (rErr) {
+      console.warn("Restock log insert warning:", rErr);
+    }
+
     return { success: true };
   },
 });
@@ -562,6 +605,35 @@ export const recordDirectPurchase = mutation({
     }
 
     await ctx.db.patch(args.storeId, { stock: stStock });
+
+    const now = new Date().toISOString();
+    const effectiveDate = now.split("T")[0];
+    const totalUnits = args.items.reduce((acc, it) => acc + (it.quantity || 0), 0);
+    const totalCost = args.items.reduce((acc, it) => acc + ((it.quantity || 0) * (it.costPerUnit || 0)), 0);
+
+    try {
+      await ctx.db.insert("restocks", {
+        clientId: store.clientId,
+        destinationType: "store",
+        destinationId: store._id,
+        destinationName: store.name,
+        items: args.items.map((it) => ({
+          productId: it.productId,
+          productName: it.productName || "Product",
+          quantity: it.quantity,
+          costPerUnit: it.costPerUnit || 0,
+        })),
+        totalUnits,
+        totalCost: totalCost > 0 ? totalCost : undefined,
+        paymentMethod: args.paymentMethod || "Cash",
+        supplierName: args.supplierName,
+        date: effectiveDate,
+        createdAt: now,
+      });
+    } catch (rErr) {
+      console.warn("Restock log insert warning:", rErr);
+    }
+
     return { success: true };
   },
 });

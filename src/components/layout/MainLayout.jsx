@@ -13,7 +13,6 @@ import {
   Menu,
   X,
   LogOut,
-  Loader2,
   Settings,
   User,
   Copy,
@@ -29,6 +28,7 @@ import { useAuth } from '../../context/AuthContext'
 import { useTenant } from '../../context/TenantContext'
 import { useToast } from '../../context/ToastContext'
 import { Badge } from '../ui/Badge'
+import { AppSkeleton } from '../ui/AppSkeleton'
 
 export function MainLayout() {
   const { toast } = useToast()
@@ -164,17 +164,9 @@ export function MainLayout() {
   }
 
 
-  // Show full-screen loader while Firestore data is syncing on first load
+  // Show skeleton UI while workspace data is syncing on first load
   if (loading || !currentUser) {
-    return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 gap-3">
-        <div className="w-12 h-12 rounded-2xl bg-slate-900 text-white flex items-center justify-center font-bold text-xl shadow-sm">
-          O
-        </div>
-        <Loader2 className="w-5 h-5 text-slate-400 animate-spin" />
-        <p className="text-xs text-slate-500 font-medium">Connecting to OMESTOCK…</p>
-      </div>
-    )
+    return <AppSkeleton />
   }
 
   // Unpaid credit sales count
@@ -239,10 +231,9 @@ export function MainLayout() {
     },
     {
       to: '/dashboard',
-      label: 'Reports',
+      label: 'Dashboard',
       icon: LayoutDashboard,
       ownerOnly: true,
-      badge: 'Soon',
     },
     {
       to: '/profile',
@@ -374,7 +365,13 @@ export function MainLayout() {
                   <span>{item.label}</span>
                 </div>
                 {item.badge && (
-                  <span className="px-2 py-0.5 text-[10px] font-extrabold bg-amber-500 text-white rounded-full">
+                  <span
+                    className={`px-2 py-0.5 text-[10px] font-extrabold rounded-full ${
+                      item.badge === 'Soon'
+                        ? 'bg-slate-200 text-slate-600'
+                        : 'bg-emerald-600 text-white'
+                    }`}
+                  >
                     {item.badge}
                   </span>
                 )}
@@ -397,7 +394,7 @@ export function MainLayout() {
                 <span className="text-xs font-bold text-slate-900 truncate">
                   {currentUser?.name || 'User'}
                 </span>
-                <Badge variant={currentUser?.role === 'owner' ? 'purple' : currentUser?.role === 'admin' ? 'info' : 'default'} className="text-[9px] px-1.5 py-0 font-bold">
+                <Badge variant={currentUser?.role === 'owner' ? 'success' : 'default'} className="text-[9px] px-1.5 py-0 font-bold">
                   {currentUser?.role === 'owner' ? 'Owner' : currentUser?.role === 'admin' ? 'Admin' : 'Staff'}
                 </Badge>
               </div>
@@ -507,17 +504,19 @@ export function MainLayout() {
                         <span>Profile & Personal Info</span>
                       </Link>
 
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowUserMenu(false)
-                          setShowBizSettings(true)
-                        }}
-                        className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold text-slate-700 hover:bg-slate-100 hover:text-slate-900 transition-colors cursor-pointer text-left"
-                      >
-                        <Settings className="w-4 h-4 text-slate-500" />
-                        <span>Workspace Settings</span>
-                      </button>
+                      {isOwner && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowUserMenu(false)
+                            setShowBizSettings(true)
+                          }}
+                          className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold text-slate-700 hover:bg-slate-100 hover:text-slate-900 transition-colors cursor-pointer text-left"
+                        >
+                          <Settings className="w-4 h-4 text-slate-500" />
+                          <span>Workspace Settings</span>
+                        </button>
+                      )}
                     </div>
 
                     {/* Sign Out Action */}
@@ -862,6 +861,19 @@ export function MainLayout() {
 
               {isOwner && (
                 <>
+                  <Link
+                    to="/dashboard"
+                    onClick={() => setShowMobileMoreSheet(false)}
+                    className="flex items-center gap-3 p-3.5 rounded-xl bg-slate-50 hover:bg-slate-100 transition-colors touch-manipulation font-bold text-xs text-slate-800"
+                  >
+                    <div className="w-8 h-8 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center">
+                      <LayoutDashboard className="w-4 h-4" />
+                    </div>
+                    <div className="flex-1">
+                      <div>Store Management Dashboard</div>
+                      <div className="text-[10px] text-slate-500 font-normal">Live sales, stock health &amp; profit analytics</div>
+                    </div>
+                  </Link>
                   <Link
                     to="/staff"
                     onClick={() => setShowMobileMoreSheet(false)}

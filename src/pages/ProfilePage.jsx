@@ -522,81 +522,83 @@ export function ProfilePage() {
         </CardContent>
       </Card>
 
-      {/* Danger Zone: Clear Database & Delete Account */}
-      <Card className="rounded-3xl border border-rose-200 bg-rose-50/30 shadow-xs">
-        <CardHeader className="pb-3 border-b border-rose-100">
-          <CardTitle className="text-sm font-bold text-rose-900 flex items-center gap-2">
-            <AlertTriangle className="w-4 h-4 text-rose-600" />
-            Danger Zone & Data Reset
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="pt-4 space-y-4">
-          <p className="text-xs text-slate-600">
-            Need to start fresh or remove your data? Use the actions below with care.
-          </p>
+      {/* Danger Zone: Clear Database & Delete Account (Owner Only) */}
+      {isOwner && (
+        <Card className="rounded-3xl border border-rose-200 bg-rose-50/30 shadow-xs">
+          <CardHeader className="pb-3 border-b border-rose-100">
+            <CardTitle className="text-sm font-bold text-rose-900 flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-rose-600" />
+              Danger Zone & Data Reset
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="pt-4 space-y-4">
+            <p className="text-xs text-slate-600">
+              Need to start fresh or remove your data? Use the actions below with care.
+            </p>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            {/* 1. Clear Inventory & Sales */}
-            <div className="p-4 rounded-2xl bg-white border border-amber-200 flex flex-col justify-between gap-3">
-              <div>
-                <h5 className="text-xs font-bold text-slate-900">Clear Inventory & Sales</h5>
-                <p className="text-[11px] text-slate-500 mt-1">
-                  Deletes all products and sales, resetting stock counts to 0. Keeps your company code and account.
-                </p>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              {/* 1. Clear Inventory & Sales */}
+              <div className="p-4 rounded-2xl bg-white border border-amber-200 flex flex-col justify-between gap-3">
+                <div>
+                  <h5 className="text-xs font-bold text-slate-900">Clear Inventory & Sales</h5>
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    Deletes all products and sales, resetting stock counts to 0. Keeps your company code and account.
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={clearingData}
+                  onClick={handleClearDatabase}
+                  className="w-full font-bold text-xs border-amber-300 text-amber-900 hover:bg-amber-50"
+                >
+                  {clearingData ? 'Clearing Data...' : 'Clear All Data'}
+                </Button>
               </div>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={clearingData}
-                onClick={handleClearDatabase}
-                className="w-full font-bold text-xs border-amber-300 text-amber-900 hover:bg-amber-50"
-              >
-                {clearingData ? 'Clearing Data...' : 'Clear All Data'}
-              </Button>
-            </div>
 
-            {/* 2. Wipe Workspace & Start Fresh */}
-            <div className="p-4 rounded-2xl bg-white border border-rose-200 flex flex-col justify-between gap-3">
-              <div>
-                <h5 className="text-xs font-bold text-rose-950">Wipe & Start Fresh</h5>
-                <p className="text-[11px] text-slate-500 mt-1">
-                  Wipes this workspace, branches, and records. Brings you back to clean company onboarding setup.
-                </p>
+              {/* 2. Wipe Workspace & Start Fresh */}
+              <div className="p-4 rounded-2xl bg-white border border-rose-200 flex flex-col justify-between gap-3">
+                <div>
+                  <h5 className="text-xs font-bold text-rose-950">Wipe & Start Fresh</h5>
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    Wipes this workspace, branches, and records. Brings you back to clean company onboarding setup.
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={wipingAccount}
+                  onClick={handleWipeAndReset}
+                  className="w-full font-bold text-xs bg-rose-600 hover:bg-rose-700 text-white"
+                >
+                  {wipingAccount ? 'Wiping Workspace...' : 'Wipe & Start Fresh'}
+                </Button>
               </div>
-              <Button
-                type="button"
-                size="sm"
-                disabled={wipingAccount}
-                onClick={handleWipeAndReset}
-                className="w-full font-bold text-xs bg-rose-600 hover:bg-rose-700 text-white"
-              >
-                {wipingAccount ? 'Wiping Workspace...' : 'Wipe & Start Fresh'}
-              </Button>
-            </div>
 
-            {/* 3. Delete Account */}
-            <div className="p-4 rounded-2xl bg-white border border-slate-300 flex flex-col justify-between gap-3">
-              <div>
-                <h5 className="text-xs font-bold text-slate-900">Delete Account</h5>
-                <p className="text-[11px] text-slate-500 mt-1">
-                  Permanently deletes your account from the database and Clerk authentication.
-                </p>
+              {/* 3. Delete Account */}
+              <div className="p-4 rounded-2xl bg-white border border-slate-300 flex flex-col justify-between gap-3">
+                <div>
+                  <h5 className="text-xs font-bold text-slate-900">Delete Account</h5>
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    Permanently deletes your account from the database and Clerk authentication.
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={deletingUser}
+                  onClick={handleDeleteAccount}
+                  className="w-full font-bold text-xs bg-slate-900 hover:bg-slate-800 text-white"
+                >
+                  <Trash2 className="w-3.5 h-3.5 mr-1" />
+                  <span>{deletingUser ? 'Deleting Account...' : 'Delete Account'}</span>
+                </Button>
               </div>
-              <Button
-                type="button"
-                size="sm"
-                disabled={deletingUser}
-                onClick={handleDeleteAccount}
-                className="w-full font-bold text-xs bg-slate-900 hover:bg-slate-800 text-white"
-              >
-                <Trash2 className="w-3.5 h-3.5 mr-1" />
-                <span>{deletingUser ? 'Deleting Account...' : 'Delete Account'}</span>
-              </Button>
             </div>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Session Management */}
       <div className="bg-slate-100 rounded-3xl p-5 sm:p-6 flex flex-col sm:flex-row items-center justify-between gap-4">
