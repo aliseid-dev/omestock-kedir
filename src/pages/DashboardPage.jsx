@@ -784,90 +784,15 @@ export function DashboardPage() {
     }
   }, [filteredExpenses])
 
-  // ─── Profit Display Calculations (Option 3: Real Gross Markup for Daily, Net Profit for Monthly Reviews) ───
+  // ─── Profit Display (Coming Soon · 0 Data) ───
   const currentProfitDisplay = useMemo(() => {
-    // 1. Live Gross Profit (Daily operations: Selling Price - Purchase Cost)
-    if (profitRange === 'gross') {
-      const pct = todaySalesTotal > 0 ? Math.round((todayGrossProfit / todaySalesTotal) * 100) : 0
-      return {
-        title: 'Live Gross Profit',
-        value: formatCurrency(todayGrossProfit),
-        sub: `Today · ${pct}% live markup (Sales − Purchase Cost)`,
-        pct: pct
-      }
-    }
-
-    // 2. Last Month Closed Net Profit (Ended month: Monthly Gross - Operating Expenses)
-    if (profitRange === 'lastMonth') {
-      const netProfit = Math.max(0, lastMonthGrossProfit - totalExpenses)
-      const pct = lastMonthSalesTotal > 0 ? Math.round((netProfit / lastMonthSalesTotal) * 100) : 0
-      return {
-        title: 'Closed Net Profit',
-        value: formatCurrency(netProfit),
-        sub: `${prevMonthName} · Gross (${formatCurrency(lastMonthGrossProfit)}) − Expenses (${formatCurrency(totalExpenses)})`,
-        pct: pct
-      }
-    }
-
-    // 3. This Month Running Net Profit (In-progress: Current Gross - Logged Expenses)
-    if (profitRange === 'thisMonth') {
-      const netProfit = Math.max(0, monthGrossProfit - totalExpenses)
-      const pct = monthSalesTotal > 0 ? Math.round((netProfit / monthSalesTotal) * 100) : 0
-      return {
-        title: 'Running Net Profit',
-        value: formatCurrency(netProfit),
-        sub: `${currentMonthYear} · Gross (${formatCurrency(monthGrossProfit)}) − Expenses (${formatCurrency(totalExpenses)})`,
-        pct: pct
-      }
-    }
-
-    // 4. Custom Date Range Net Profit
-    const sDate = new Date(customStartDate)
-    const eDate = new Date(customEndDate)
-    eDate.setHours(23, 59, 59, 999)
-    const customSales = sales.filter((s) => {
-      const d = new Date(s.createdAt || s.timestamp || Date.now())
-      return d >= sDate && d <= eDate
-    })
-    const customSalesTotal = customSales.reduce((sum, s) => sum + Number(s.totalAmount ?? s.total ?? 0), 0)
-    let customGross = 0
-    customSales.forEach((s) => {
-      const items = Array.isArray(s.items) ? s.items : []
-      items.forEach((it) => {
-        const q = Number(it.quantity) || 1
-        const sellPrice = Number(it.price || it.unitPrice || 0)
-        const cost = Number(it.costPrice || productCostMap.get(it.productId) || 0)
-        if (sellPrice > 0 && cost > 0 && sellPrice >= cost) {
-          customGross += (sellPrice - cost) * q
-        }
-      })
-    })
-    const customNet = Math.max(0, customGross - totalExpenses)
-    const customPct = customSalesTotal > 0 ? Math.round((customNet / customSalesTotal) * 100) : 0
-
     return {
-      title: 'Custom Net Profit',
-      value: formatCurrency(customNet),
-      sub: `${customProfitLabel || 'Custom period'} · Gross (${formatCurrency(customGross)}) − Expenses (${formatCurrency(totalExpenses)})`,
-      pct: customPct
+      title: 'Net Profit',
+      value: '0.00 ETB',
+      sub: 'Automated profit analytics & margin calculation coming soon',
+      pct: 0
     }
-  }, [
-    profitRange,
-    todaySalesTotal,
-    todayGrossProfit,
-    lastMonthSalesTotal,
-    lastMonthGrossProfit,
-    prevMonthName,
-    monthSalesTotal,
-    monthGrossProfit,
-    totalExpenses,
-    currentMonthYear,
-    customProfitLabel,
-    customStartDate,
-    customEndDate,
-    sales,
-    productCostMap
-  ])
+  }, [])
 
   // ─── Save Purchase Price Handler ───
   const handleSavePurchasePrice = async (e) => {
@@ -1453,45 +1378,26 @@ export function DashboardPage() {
                   r="40"
                   style={{
                     strokeDasharray: 251.32,
-                    strokeDashoffset: 251.32 * (1 - (currentProfitDisplay.pct ?? 0) / 100)
+                    strokeDashoffset: 251.32
                   }}
                 />
               </svg>
               <div className="ring-center">
-                <strong>{currentProfitDisplay.pct}%</strong>
+                <strong>0%</strong>
                 <span>margin</span>
               </div>
             </div>
             <div className="profit-info">
               <div className="profit-head">
-                <span className="lbl">{currentProfitDisplay.title || 'Profit'}</span>
-                <div className="pills sm" id="profitFilters">
-                  {[
-                    { key: 'gross', label: 'Gross' },
-                    { key: 'lastMonth', label: 'Last Mo' },
-                    { key: 'thisMonth', label: 'This Mo' },
-                    { key: 'custom', label: 'Custom' }
-                  ].map((tab) => (
-                    <button
-                      key={tab.key}
-                      type="button"
-                      className={`pill ${profitRange === tab.key ? 'active' : ''}`}
-                      onClick={() => {
-                        if (tab.key === 'custom') {
-                          setDateTarget('profit')
-                          setActiveModal('date')
-                        } else {
-                          setProfitRange(tab.key)
-                        }
-                      }}
-                    >
-                      {tab.label}
-                    </button>
-                  ))}
+                <div className="flex items-center gap-2">
+                  <span className="lbl">Profit</span>
+                  <span className="px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wider bg-amber-50 text-amber-700 border border-amber-200 rounded-full">
+                    Coming Soon
+                  </span>
                 </div>
               </div>
-              <div className="big-value">{currentProfitDisplay.value}</div>
-              <div className="sub">{currentProfitDisplay.sub}</div>
+              <div className="big-value">0.00 ETB</div>
+              <div className="sub">Automated profit analytics &amp; margin calculation coming soon</div>
             </div>
           </div>
         </article>
